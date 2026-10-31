@@ -1,0 +1,299 @@
+@page "/sotuv"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Sales)]
+@using System.Globalization
+@inject SalesService Sales
+@inject CenterDataService CenterData
+@inject NavigationManager Navigation
+
+<PageTitle>Sotuv — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">SOTUV</p><h1>Lidlar</h1><p class="muted">Qiziqqan mijozlardan o‘quvchigacha. Manba va yo‘qotish sababi majburiy — shunda qaysi reklama ishlayotgani ko‘rinadi.</p></div>
+        <div class="inline-actions">
+            <button class="btn @(view == "board" ? "btn-primary" : "btn-secondary")" @onclick="@(() => view = "board")">Doska</button>
+            <button class="btn @(view == "list" ? "btn-primary" : "btn-secondary")" @onclick="@(() => view = "list")">Ro‘yxat</button>
+            <button class="btn @(view == "stats" ? "btn-primary" : "btn-secondary")" @onclick="ShowStats">Hisobot</button>
+        </div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message
+            @if (duplicateWarning) { <text> </text><button class="btn-link" @onclick="() => AddLead(true)">Baribir qo‘shish</button> }
+        </div>
+    }
+
+    <details class="panel" open="@(leads.Count == 0)">
+        <summary class="panel-heading" style="cursor:pointer"><div><p class="eyebrow">YANGI LID</p><h2>+ Lid qo‘shish</h2></div></summary>
+        <div class="form-columns">
+            <div><label class="field-label">Ism familiya</label><input class="form-control" @bind="input.FullName" /></div>
+            <div><label class="field-label">Telefon</label><input class="form-control" @bind="input.Phone" placeholder="+998 90 123 45 67" /></div>
+        </div>
+        <div class="form-columns">
+            <div>
+                <label class="field-label">Manba <span class="money-negative">*</span></label>
+                <select class="form-select" @bind="sourceText">
+                    <option value="">Qayerdan keldi?</option>
+                    @foreach (var source in Enum.GetValues<LeadSource>()) { <option value="@source">@Lead.SourceLabel(source)</option> }
+                </select>
+            </div>
+            <div><label class="field-label">Qiziqqan kurs</label><input class="form-control" @bind="input.CourseInterest" placeholder="Ingliz tili, IELTS..." /></div>
+        </div>
+        <div class="form-columns">
+            <div>
+                <label class="field-label">Filial</label>
+                <select class="form-select" @bind="input.BranchId">
+                    @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+                </select>
+            </div>
+            <div>
+                <label class="field-label">Mas’ul xodim</label>
+                <select class="form-select" @bind="input.AssignedUserId">
+                    <option value="">Men</option>
+                    @foreach (var person in assignees) { <option value="@person.UserId">@person.Name</option> }
+                </select>
+            </div>
+        </div>
+        <label class="field-label">Izoh</label>
+        <input class="form-control" @bind="input.Note" />
+        <button class="btn btn-primary form-submit" @onclick="() => AddLead(false)">Lidni saqlash</button>
+    </details>
+
+    <div class="filter-bar section-gap">
+        <input class="form-control search-input" placeholder="Lid qidirish: ism, telefon, kurs" @bind="search" @bind:event="oninput" />
+        <select class="form-select branch-select" @bind="sourceFilter">
+            <option value="">Barcha manbalar</option>
+            @foreach (var source in Enum.GetValues<LeadSource>()) { <option value="@source">@Lead.SourceLabel(source)</option> }
+        </select>
+    </div>
+
+    @if (view == "board")
+    {
+        <div class="kanban">
+            @foreach (var stage in Enum.GetValues<LeadStage>())
+            {
+                var cards = Filtered.Where(l => l.Stage == stage).ToList();
+                <section class="kanban-column">
+                    <header><h2>@Lead.StageLabel(stage)</h2><small>@cards.Count</small></header>
+                    <div class="kanban-cards">
+                        @if (cards.Count == 0) { <div class="kanban-empty">Bo‘sh</div> }
+                        @foreach (var lead in cards.Take(100))
+                        {
+                            <article class="kanban-card" @key="lead.Id">
+                                <header><strong>@lead.FullName</strong><span class="chip">@Lead.SourceLabel(lead.Source)</span></header>
+                                <p>📞 <a href="tel:@lead.Phone">@lead.Phone</a></p>
+                                @if (!string.IsNullOrEmpty(lead.CourseInterest)) { <p>@lead.CourseInterest</p> }
+                                <p>Mas’ul: @(string.IsNullOrEmpty(lead.AssignedName) ? "—" : lead.AssignedName) · @lead.CreatedAtUtc.ToLocalTime().ToString("dd.MM")</p>
+                                @if (!string.IsNullOrEmpty(lead.Note)) { <p><em>@lead.Note</em></p> }
+                                @if (lead.Stage == LeadStage.Lost) { <span class="chip chip-danger">@lead.LostReason</span> }
+                                @if (lead.ConvertedStudentId is { } studentId) { <a class="btn-link" href="/oquvchilar/@studentId">O‘quvchi profili →</a> }
+                                <LeadActions Lead="lead" OnMove="Move" OnConvert="Convert" />
+                            </article>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    }
+    else if (view == "list")
+    {
+        <div class="table-panel">
+            <table class="data-table">
+                <thead><tr><th>LID</th><th>MANBA</th><th>KURS</th><th>BOSQICH</th><th>MAS’UL</th><th>QO‘SHILGAN</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var lead in Filtered)
+                    {
+                        <tr>
+                            <td><strong>@lead.FullName</strong><br /><span class="muted">@lead.Phone</span></td>
+                            <td>@Lead.SourceLabel(lead.Source)</td>
+                            <td>@(string.IsNullOrEmpty(lead.CourseInterest) ? "—" : lead.CourseInterest)</td>
+                            <td>@Lead.StageLabel(lead.Stage)@if (lead.Stage == LeadStage.Lost) { <br /><span class="muted">@lead.LostReason</span> }</td>
+                            <td>@(string.IsNullOrEmpty(lead.AssignedName) ? "—" : lead.AssignedName)</td>
+                            <td>@lead.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                            <td>@if (lead.ConvertedStudentId is { } studentId) { <a class="btn-link" href="/oquvchilar/@studentId">Profil</a> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="table-count">@Filtered.Count() ta lid</p>
+    }
+    else if (funnel is not null)
+    {
+        <div class="filter-bar expense-filters">
+            <div><label class="field-label">Dan</label><input type="date" class="form-control" @bind="statsFrom" /></div>
+            <div><label class="field-label">Gacha</label><input type="date" class="form-control" @bind="statsTo" /></div>
+            <button class="btn btn-secondary" @onclick="ShowStats">Ko‘rsatish</button>
+        </div>
+        <div class="metric-grid finance-metrics">
+            <div class="metric-card"><span class="metric-icon violet">◎</span><span class="metric-label">Yangi lidlar</span><strong>@funnel.TotalLeads</strong><span class="metric-caption">Tanlangan davrda</span></div>
+            <div class="metric-card"><span class="metric-icon mint">✓</span><span class="metric-label">O‘quvchi bo‘ldi</span><strong>@funnel.ByStage[LeadStage.Converted]</strong><span class="metric-caption">Konversiya: @Percent(funnel.ByStage[LeadStage.Converted], funnel.TotalLeads)</span></div>
+            <div class="metric-card"><span class="metric-icon blue">◷</span><span class="metric-label">O‘rtacha yopilish</span><strong>@(funnel.AverageDaysToConvert is { } days ? $"{days:0.0} kun" : "—")</strong><span class="metric-caption">Liddan o‘quvchigacha</span></div>
+        </div>
+        <div class="workspace-grid section-gap">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">VORONKA</p><h2>Bosqichlar</h2></div></div>
+                @foreach (var stage in Enum.GetValues<LeadStage>())
+                {
+                    var count = funnel.ByStage[stage];
+                    <div style="margin-bottom:10px">
+                        <div class="inline-actions" style="justify-content:space-between"><span>@Lead.StageLabel(stage)</span><strong>@count (@Percent(count, funnel.TotalLeads))</strong></div>
+                        <div class="attendance-progress"><span style="width:@(funnel.TotalLeads == 0 ? "0" : (count * 100.0 / funnel.TotalLeads).ToString("0", CultureInfo.InvariantCulture))%"></span></div>
+                    </div>
+                }
+            </section>
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">MANBALAR</p><h2>Qaysi manba ishlayapti</h2></div></div>
+                @if (funnel.BySource.Count == 0) { <p class="muted">Ma’lumot yo‘q.</p> }
+                @foreach (var source in funnel.BySource)
+                {
+                    <div class="branch-item"><span class="branch-icon">◎</span><span><strong>@Lead.SourceLabel(source.Source)</strong><small>@source.Leads lid → @source.Converted o‘quvchi</small></span><strong>@Percent(source.Converted, source.Leads)</strong></div>
+                }
+                <h3 class="section-gap">Yo‘qotish sabablari</h3>
+                @if (funnel.LostReasons.Count == 0) { <p class="muted">Yo‘qotilgan lid yo‘q.</p> }
+                @foreach (var reason in funnel.LostReasons)
+                {
+                    <div class="branch-item"><span class="branch-icon">✗</span><span><strong>@reason.Reason</strong></span><strong>@reason.Count</strong></div>
+                }
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    private IReadOnlyList<LeadRow> leads = [];
+    private IReadOnlyList<Branch> branches = [];
+    private IReadOnlyList<CashRecipient> assignees = [];
+    private readonly LeadInput input = new();
+    private string sourceText = "";
+    private string search = "";
+    private string sourceFilter = "";
+    private string view = "board";
+    private SalesFunnel? funnel;
+    private DateOnly statsFrom = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly statsTo = DateOnly.FromDateTime(DateTime.Today);
+    private string? message;
+    private bool isError;
+    private bool duplicateWarning;
+
+    private IEnumerable<LeadRow> Filtered
+    {
+        get
+        {
+            var term = search.Trim();
+            var digits = new string(term.Where(char.IsDigit).ToArray());
+            return leads.Where(lead =>
+                (sourceFilter.Length == 0 || lead.Source.ToString() == sourceFilter) &&
+                (term.Length == 0 ||
+                 lead.FullName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                 lead.CourseInterest.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                 (digits.Length >= 3 && new string(lead.Phone.Where(char.IsDigit).ToArray()).Contains(digits))));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        search = Query ?? "";
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+            assignees = await Sales.GetAssignableUsersAsync();
+            if (branches.Count > 0) input.BranchId = branches[0].Id;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            leads = await Sales.GetLeadsAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task AddLead(bool allowDuplicate)
+    {
+        duplicateWarning = false;
+        input.Source = Enum.TryParse<LeadSource>(sourceText, out var source) ? source : null;
+        if (string.IsNullOrEmpty(input.AssignedUserId)) input.AssignedUserId = null;
+        try
+        {
+            await Sales.AddLeadAsync(input, allowDuplicate);
+            input.FullName = "";
+            input.Phone = "";
+            input.CourseInterest = "";
+            input.Note = "";
+            SetMessage("Lid qo‘shildi.", false);
+            await Load();
+        }
+        catch (DuplicateLeadException exception)
+        {
+            duplicateWarning = true;
+            SetMessage(exception.Message, true);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Move((int Id, LeadStage Stage, string Reason) change)
+    {
+        try
+        {
+            await Sales.MoveAsync(change.Id, change.Stage, change.Reason);
+            SetMessage("Lid bosqichi yangilandi.", false);
+            await Load();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Convert(int leadId)
+    {
+        try
+        {
+            var studentId = await Sales.ConvertToStudentAsync(leadId);
+            Navigation.NavigateTo($"/oquvchilar/{studentId}");
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task ShowStats()
+    {
+        view = "stats";
+        try
+        {
+            funnel = await Sales.GetFunnelAsync(statsFrom, statsTo);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string Percent(int part, int total) => total == 0 ? "0%" : $"{part * 100.0 / total:0.#}%";
+}

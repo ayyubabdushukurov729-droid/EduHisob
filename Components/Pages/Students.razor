@@ -1,0 +1,142 @@
+@page "/oquvchilar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.StudentDesk)]
+@using Microsoft.AspNetCore.Components
+@inject CenterDataService CenterData
+@inject StudentAccountService Accounts
+@inject NavigationManager Navigation
+
+<PageTitle>O‘quvchilar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">MARKAZ BOSHQARUVI</p><h1>O‘quvchilar</h1><p class="muted">Markazingiz o‘quvchilar ro‘yxati</p></div>
+        <a class="btn btn-primary" href="/oquvchilar/yangi">+ O‘quvchi qo‘shish</a>
+    </div>
+    <EditForm Model="filters" OnValidSubmit="LoadStudents" FormName="student-search" class="filter-bar">
+        <InputText @bind-Value="filters.Search" class="form-control search-input" placeholder="Ism yoki telefon bo‘yicha qidirish" aria-label="O‘quvchilarni qidirish" />
+        <InputSelect @bind-Value="filters.BranchId" class="form-select branch-select" aria-label="Filial bo‘yicha saralash">
+            <option value="">Barcha filiallar</option>
+            @foreach (var branch in branches)
+            {
+                <option value="@branch.Id">@branch.Name</option>
+            }
+        </InputSelect>
+        <InputSelect @bind-Value="filters.Status" class="form-select branch-select" aria-label="Holat bo‘yicha saralash">
+            <option value="">Barcha holatlar</option>
+            @foreach (var status in Enum.GetValues<StudentStatus>())
+            {
+                <option value="@status">@StatusLabel(status)</option>
+            }
+        </InputSelect>
+        <button class="btn btn-secondary" type="submit">Qidirish</button>
+    </EditForm>
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+    else if (students is null)
+    {
+        <div class="notice">O‘quvchilar yuklanmoqda...</div>
+    }
+    else if (students.Count == 0)
+    {
+        <div class="empty-state"><span class="empty-icon">♙</span><h2>O‘quvchilar topilmadi</h2><p>Qidiruvni o‘zgartiring yoki yangi o‘quvchi qo‘shing.</p><a class="btn btn-primary" href="/oquvchilar/yangi">O‘quvchi qo‘shish</a></div>
+    }
+    else
+    {
+        <div class="table-panel">
+            <table class="data-table">
+                <thead><tr><th>O‘QUVCHI</th><th>TELEFON</th><th>FILIAL</th><th>HOLATI</th><th>BALANS</th><th>QO‘SHILGAN SANA</th></tr></thead>
+                <tbody>
+                @foreach (var student in VisibleStudents)
+                {
+                    var balance = balances.GetValueOrDefault(student.Id);
+                    <tr><td><a class="text-link-strong" href="/oquvchilar/@student.Id">@student.FullName</a></td><td>@student.Phone</td><td>@branches.FirstOrDefault(branch => branch.Id == student.BranchId)?.Name</td><td><span class="status-badge @StatusClass(student.Status)">@StatusLabel(student.Status)</span></td><td class="@(balance < 0 ? "money-negative" : balance > 0 ? "money-positive" : "money-zero")">@balance.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("uz-Latn-UZ")) so‘m</td><td>@student.JoinedOn.ToString("dd.MM.yyyy")</td></tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        <p class="table-count">@VisibleStudents.Count() nafar o‘quvchi@(onlyDebtors ? " (faqat qarzdorlar)" : "") · <button class="btn-link" @onclick="() => onlyDebtors = !onlyDebtors">@(onlyDebtors ? "Hammasini ko‘rsatish" : "Faqat qarzdorlarni ko‘rsatish")</button></p>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Branch> branches = [];
+    private IReadOnlyList<Student>? students;
+    private Dictionary<int, decimal> balances = [];
+    private bool onlyDebtors;
+    private IEnumerable<Student> VisibleStudents => (students ?? []).Where(student => !onlyDebtors || balances.GetValueOrDefault(student.Id) < 0);
+    private readonly SearchFilters filters = new();
+    private string? error;
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? StatusQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(StatusQuery))
+            {
+                if (!Enum.TryParse<StudentStatus>(StatusQuery, ignoreCase: true, out var status))
+                {
+                    error = "O‘quvchi holati filtri noto‘g‘ri.";
+                    students = [];
+                    return;
+                }
+
+                filters.Status = status;
+            }
+            branches = await CenterData.GetBranchesAsync();
+            await LoadStudents();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            error = exception.Message;
+        }
+    }
+
+    private async Task LoadStudents()
+    {
+        try
+        {
+            var uri = Navigation.GetUriWithQueryParameter("status", filters.Status?.ToString());
+            if (uri != Navigation.Uri)
+            {
+                Navigation.NavigateTo(uri, replace: true);
+            }
+
+            students = await CenterData.GetStudentsAsync(filters.Search, filters.BranchId, filters.Status);
+            balances = await Accounts.GetBalancesAsync();
+            error = null;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            error = exception.Message;
+        }
+    }
+
+    private static string StatusLabel(StudentStatus status) => status switch
+    {
+        StudentStatus.Trial => "Sinov",
+        StudentStatus.Active => "Faol",
+        StudentStatus.Frozen => "Muzlatilgan",
+        StudentStatus.Left => "Ketgan",
+        _ => "Arxiv"
+    };
+
+    private static string StatusClass(StudentStatus status) => status switch
+    {
+        StudentStatus.Active => "status-active",
+        StudentStatus.Trial => "status-trial",
+        StudentStatus.Frozen => "status-frozen",
+        _ => "status-muted"
+    };
+
+    private sealed class SearchFilters
+    {
+        public string? Search { get; set; }
+        public int? BranchId { get; set; }
+        public StudentStatus? Status { get; set; }
+    }
+}

@@ -1,0 +1,324 @@
+@page "/guruhlar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.StudentDesk)]
+@using System.ComponentModel.DataAnnotations
+@inject CenterDataService CenterData
+
+<PageTitle>Guruhlar va kurslar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">TA’LIM JARAYONI</p><h1>Kurslar va guruhlar</h1><p class="muted">Kurs, jadval, filial va o‘quvchilarni bir joyda boshqaring.</p></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+    <div class="workspace-grid branch-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">YANGI KURS</p><h2>Kurs qo‘shish</h2></div></div>
+            <EditForm Model="courseInput" OnValidSubmit="SaveCourse" FormName="new-course">
+                <DataAnnotationsValidator />
+                <label class="field-label" for="course-name">Kurs nomi</label>
+                <InputText @bind-Value="courseInput.Name" id="course-name" class="form-control" />
+                <ValidationMessage For="() => courseInput.Name" />
+                <label class="field-label" for="course-description">Izoh <span class="muted">(ixtiyoriy)</span></label>
+                <InputText @bind-Value="courseInput.Description" id="course-description" class="form-control" />
+                <button class="btn btn-primary form-submit" type="submit">Kursni saqlash</button>
+            </EditForm>
+        </section>
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">YANGI GURUH</p><h2>Guruh ochish</h2></div></div>
+            @if (courses.Count == 0 || branches.Count == 0)
+            {
+                <p class="muted">Guruh ochish uchun avval faol kurs va filial bo‘lishi kerak.</p>
+            }
+            else
+            {
+                <EditForm Model="groupInput" OnValidSubmit="SaveGroup" FormName="new-study-group">
+                    <DataAnnotationsValidator />
+                    <label class="field-label" for="group-name">Guruh nomi</label>
+                    <InputText @bind-Value="groupInput.Name" id="group-name" class="form-control" />
+                    <ValidationMessage For="() => groupInput.Name" />
+                    <label class="field-label" for="group-course">Kurs</label>
+                    <InputSelect @bind-Value="groupInput.CourseId" id="group-course" class="form-select">
+                        @foreach (var course in courses) { <option value="@course.Id">@course.Name</option> }
+                    </InputSelect>
+                    <label class="field-label" for="group-branch">Filial</label>
+                    <InputSelect @bind-Value="groupInput.BranchId" @bind-Value:after="ResetSelectedRoom" id="group-branch" class="form-select">
+                        @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+                    </InputSelect>
+                    <label class="field-label" for="group-teacher">Ustoz</label>
+                    <InputSelect @bind-Value="groupInput.TeacherId" id="group-teacher" class="form-select">
+                        <option value="">Belgilanmagan</option>
+                        @foreach (var teacher in teachers) { <option value="@teacher.Id">@teacher.FullName</option> }
+                    </InputSelect>
+                    <small class="muted">Ustoz ulushi guruhda kiritilmaydi: u Moliya → Ustozlar ulushi bo‘limida belgilanadi.</small>
+                    @if (teachers.Count == 0)
+                    {
+                        <p class="muted"><a href="/xodimlar">Xodimlar sahifasida</a> “Ustoz” turidagi xodim qo‘shing — keyin bu yerda tanlanadi.</p>
+                    }
+                    <label class="field-label" for="group-room">Xona</label>
+                    <InputSelect @bind-Value="groupInput.RoomId" id="group-room" class="form-select">
+                        <option value="">Xona belgilanmagan</option>
+                        @foreach (var room in rooms.Where(room => room.BranchId == groupInput.BranchId))
+                        {
+                            <option value="@room.Id">@room.Name — @room.Capacity o‘rin</option>
+                        }
+                    </InputSelect>
+                    @if (!rooms.Any(room => room.BranchId == groupInput.BranchId))
+                    {
+                        <p class="muted"><a href="/xonalar">Bu filialga xona qo‘shish</a> orqali jadvalni xona bilan bog‘lashingiz mumkin.</p>
+                    }
+                    <fieldset class="weekday-picker">
+                        <legend class="field-label">Hafta kunlari</legend>
+                        @foreach (var day in weekdays)
+                        {
+                            <label><input type="checkbox" checked="@groupInput.Weekdays.Contains(day.Day)" @onchange="args => SetWeekday(day.Day, args)" /> @day.Label</label>
+                        }
+                    </fieldset>
+                    @if (groupSaveAttempted && groupInput.Weekdays.Count == 0) { <span class="validation-message">Kamida bitta dars kunini tanlang.</span> }
+                    <div class="form-columns">
+                        <div><label class="field-label" for="group-time">Boshlanish vaqti</label><InputText @bind-Value="groupInput.StartTime" id="group-time" type="time" class="form-control" /></div>
+                        <div><label class="field-label" for="group-capacity">Sig‘imi</label><InputNumber @bind-Value="groupInput.Capacity" id="group-capacity" class="form-control" /></div>
+                    </div>
+                    <div class="form-columns">
+                        <div><label class="field-label" for="group-fee">Oylik to‘lov</label><InputNumber @bind-Value="groupInput.MonthlyFee" id="group-fee" class="form-control" /></div>
+                        <div><label class="field-label" for="group-lessons">Oyiga darslar</label><InputNumber @bind-Value="groupInput.LessonsPerMonth" id="group-lessons" class="form-control" /></div>
+                    </div>
+                    <label class="field-label" for="group-duration">Dars davomiyligi (daqiqa)</label>
+                    <InputNumber @bind-Value="groupInput.LessonDurationMinutes" id="group-duration" class="form-control" />
+                    <button class="btn btn-primary form-submit" type="submit">Guruhni saqlash</button>
+                </EditForm>
+            }
+        </section>
+    </div>
+    </AuthorizeView>
+
+    <section class="panel groups-panel">
+        <div class="panel-heading"><div><p class="eyebrow">FAOL GURUHLAR</p><h2>@groups.Count ta guruh</h2></div></div>
+        @if (groups.Count == 0)
+        {
+            <p class="muted">Guruhlar hali yaratilmagan.</p>
+        }
+        else
+        {
+            <div class="table-panel">
+                <table class="data-table">
+                    <thead><tr><th>GURUH / KURS</th><th>FILIAL</th><th>USTOZ / XONA</th><th>JADVAL</th><th>O‘QUVCHILAR</th><th>OYLIK TO‘LOV</th></tr></thead>
+                    <tbody>
+                        @foreach (var group in groups)
+                        {
+                            <tr>
+                                <td><a class="text-link-strong" href="/guruhlar/@group.Id">@group.Name</a><br /><span class="muted">@group.CourseName</span></td>
+                                <td>@group.BranchName</td>
+                                <td>@(string.IsNullOrWhiteSpace(group.TeacherName) ? "—" : group.TeacherName)@(group.TeacherSharePercent > 0 ? $" · {group.TeacherSharePercent:0.##}%" : "")<br /><span class="muted">@group.RoomName</span></td>
+                                <td>@DayLabels(group.DaysOfWeek), @group.StartTime</td>
+                                <td>@group.StudentCount / @group.Capacity</td>
+                                <td>@group.MonthlyFee.ToString("N0") so‘m</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    @if (groups.Count > 0 && students.Count > 0)
+    {
+        <section class="panel enrollment-panel">
+            <div class="panel-heading"><div><p class="eyebrow">GURUHGA BIRIKTIRISH</p><h2>O‘quvchini guruhga qo‘shish</h2></div></div>
+            <EditForm Model="enrollmentInput" OnValidSubmit="EnrollStudent" FormName="enroll-student" class="filter-bar enrollment-form">
+                <InputSelect @bind-Value="enrollmentInput.GroupId" class="form-select" aria-label="Guruh">
+                    @foreach (var group in groups) { <option value="@group.Id">@group.Name — @group.BranchName</option> }
+                </InputSelect>
+                <InputSelect @bind-Value="enrollmentInput.StudentId" class="form-select" aria-label="O‘quvchi">
+                    <option value="0">O‘quvchini tanlang</option>
+                    @foreach (var student in students.Where(student => student.Status is not StudentStatus.Left and not StudentStatus.Archived))
+                    {
+                        <option value="@student.Id">@student.FullName — @branches.FirstOrDefault(branch => branch.Id == student.BranchId)?.Name</option>
+                    }
+                </InputSelect>
+                <button class="btn btn-secondary" type="submit">Guruhga qo‘shish</button>
+            </EditForm>
+        </section>
+    }
+</section>
+
+@code {
+    private readonly CourseInput courseInput = new();
+    private readonly GroupInput groupInput = new();
+    private readonly EnrollmentInput enrollmentInput = new();
+    private readonly (DayOfWeek Day, string Label)[] weekdays =
+    [
+        (DayOfWeek.Monday, "Du"), (DayOfWeek.Tuesday, "Se"), (DayOfWeek.Wednesday, "Ch"),
+        (DayOfWeek.Thursday, "Pa"), (DayOfWeek.Friday, "Ju"), (DayOfWeek.Saturday, "Sh"), (DayOfWeek.Sunday, "Ya")
+    ];
+    private IReadOnlyList<Course> courses = [];
+    private IReadOnlyList<Branch> branches = [];
+    private IReadOnlyList<BranchRoomSummary> rooms = [];
+    private IReadOnlyList<Student> students = [];
+    private IReadOnlyList<StudyGroupSummary> groups = [];
+    private IReadOnlyList<TeacherOption> teachers = [];
+
+    private string? message;
+    private bool isError;
+    private bool groupSaveAttempted;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+            rooms = await CenterData.GetBranchRoomsAsync();
+            courses = await CenterData.GetCoursesAsync();
+            students = await CenterData.GetStudentsAsync();
+            groups = await CenterData.GetStudyGroupsAsync();
+            try
+            {
+                teachers = await CenterData.GetTeacherOptionsAsync();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Kassir va sotuv menejeri guruh yaratmaydi, ustozlar ro'yxati ularga kerak emas.
+            }
+            if (courses.Count > 0) groupInput.CourseId = courses[0].Id;
+            if (branches.Count > 0) groupInput.BranchId = branches[0].Id;
+            if (groups.Count > 0) enrollmentInput.GroupId = groups[0].Id;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void ResetSelectedRoom() => groupInput.RoomId = null;
+
+    private void SetWeekday(DayOfWeek day, ChangeEventArgs args)
+    {
+        if (args.Value is true || string.Equals(args.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+            groupInput.Weekdays.Add(day);
+        else
+            groupInput.Weekdays.Remove(day);
+    }
+
+    private async Task SaveCourse()
+    {
+        try
+        {
+            var newCourseId = await CenterData.AddCourseAsync(courseInput.Name, courseInput.Description);
+            courseInput.Name = "";
+            courseInput.Description = "";
+            courses = await CenterData.GetCoursesAsync();
+            groupInput.CourseId = newCourseId;
+            SetMessage("Kurs saqlandi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Bu nomdagi kurs mavjud yoki ma’lumotni saqlab bo‘lmadi." : exception.Message, true);
+        }
+    }
+
+    private async Task SaveGroup()
+    {
+        groupSaveAttempted = true;
+        if (groupInput.Weekdays.Count == 0)
+        {
+            SetMessage("Kamida bitta dars kunini tanlang.", true);
+            return;
+        }
+
+        try
+        {
+            await CenterData.AddStudyGroupAsync(new StudyGroup
+            {
+                Name = groupInput.Name,
+                CourseId = groupInput.CourseId,
+                BranchId = groupInput.BranchId,
+                RoomId = groupInput.RoomId,
+                TeacherId = groupInput.TeacherId,
+                DaysOfWeek = string.Join(",", groupInput.Weekdays.Order().Select(day => (int)day)),
+                StartTime = groupInput.StartTime,
+                Capacity = groupInput.Capacity,
+                MonthlyFee = groupInput.MonthlyFee,
+                LessonsPerMonth = groupInput.LessonsPerMonth,
+                LessonDurationMinutes = groupInput.LessonDurationMinutes
+            });
+            groups = await CenterData.GetStudyGroupsAsync();
+            groupInput.Name = "";
+            if (groups.Count > 0 && enrollmentInput.GroupId == 0)
+                enrollmentInput.GroupId = groups[0].Id;
+            groupSaveAttempted = false;
+            SetMessage("Guruh saqlandi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Bu filialda bunday guruh mavjud yoki ma’lumotni saqlab bo‘lmadi." : exception.Message, true);
+        }
+    }
+
+    private async Task EnrollStudent()
+    {
+        try
+        {
+            await CenterData.EnrollStudentAsync(enrollmentInput.GroupId, enrollmentInput.StudentId);
+            groups = await CenterData.GetStudyGroupsAsync();
+            SetMessage("O‘quvchi guruhga biriktirildi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "O‘quvchini guruhga biriktirib bo‘lmadi." : exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private string DayLabels(string days)
+    {
+        var selected = days.Split(',').Select(value => int.TryParse(value, out var number) ? (DayOfWeek?)number : null).ToHashSet();
+        return string.Join(", ", weekdays.Where(day => selected.Contains(day.Day)).Select(day => day.Label));
+    }
+
+    private sealed class CourseInput
+    {
+        [Required(ErrorMessage = "Kurs nomini kiriting.")]
+        [StringLength(120, MinimumLength = 2)]
+        public string Name { get; set; } = "";
+        [StringLength(500)]
+        public string Description { get; set; } = "";
+    }
+
+    private sealed class GroupInput
+    {
+        [Required(ErrorMessage = "Guruh nomini kiriting.")]
+        [StringLength(120, MinimumLength = 2)]
+        public string Name { get; set; } = "";
+        public int CourseId { get; set; }
+        public int BranchId { get; set; }
+        public int? TeacherId { get; set; }
+        public int? RoomId { get; set; }
+        [Required]
+        public string StartTime { get; set; } = "09:00";
+        [Range(1, 1000)]
+        public int Capacity { get; set; } = 20;
+        [Range(typeof(decimal), "0", "999999999", ErrorMessage = "Oylik to‘lov manfiy bo‘lmasin.")]
+        public decimal MonthlyFee { get; set; }
+        [Range(1, 100)]
+        public int LessonsPerMonth { get; set; } = 12;
+        [Range(1, 600)]
+        public int LessonDurationMinutes { get; set; } = 60;
+        public HashSet<DayOfWeek> Weekdays { get; } = [];
+    }
+
+    private sealed class EnrollmentInput
+    {
+        public int GroupId { get; set; }
+        [Range(1, int.MaxValue, ErrorMessage = "O‘quvchini tanlang.")]
+        public int StudentId { get; set; }
+    }
+}

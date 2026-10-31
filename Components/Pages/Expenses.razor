@@ -1,0 +1,262 @@
+@page "/moliya"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Cash)]
+@using System.ComponentModel.DataAnnotations
+@inject CenterDataService CenterData
+
+<PageTitle>Moliya — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">MARKAZ MOLIYASI</p><h1>Moliya</h1><p class="muted">Daromad, o‘quvchi to‘lovlari va xarajatlarni bitta reestrda kuzating.</p></div>
+        <div class="quick-links finance-links">
+            <a href="/kassa"><span class="quick-icon violet">◈</span><span><strong>Kassa</strong><small>Mendagi pul va topshirish</small></span><span class="arrow">→</span></a>
+            <a href="/qarzdorlar"><span class="quick-icon blue">⚠</span><span><strong>Qarzdorlar</strong><small>Qarz bilan ishlash doskasi</small></span><span class="arrow">→</span></a>
+            <AuthorizeView Roles="@CenterRoles.Finance" Context="r">
+                <a href="/ish-haqi"><span class="quick-icon blue">◫</span><span><strong>Ish haqi</strong><small>Avans va oylik hisoblari</small></span><span class="arrow">→</span></a>
+                <a href="/hisobotlar"><span class="quick-icon blue">▥</span><span><strong>Hisobotlar</strong><small>Daromad va xarajat tahlili</small></span><span class="arrow">→</span></a>
+            </AuthorizeView>
+        </div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    @* Jami summalar va davr qoldig'i (foyda) faqat asoschi va buxgalterga ko'rinadi. *@
+    <AuthorizeView Roles="@CenterRoles.Finance">
+        <div class="metric-grid finance-metrics">
+        <article class="metric-card"><span class="metric-label">Jami daromad</span><strong>@transactions.Where(item => item.Type == FinancialTransactionType.Income).Sum(item => item.Amount).ToString("N0")</strong><span class="metric-caption">so‘m</span></article>
+        <article class="metric-card"><span class="metric-label">Jami xarajat</span><strong>@transactions.Where(item => item.Type == FinancialTransactionType.Expense).Sum(item => item.Amount).ToString("N0")</strong><span class="metric-caption">so‘m</span></article>
+        <article class="metric-card"><span class="metric-label">Davr qoldig‘i</span><strong>@netAmount.ToString("N0")</strong><span class="metric-caption">daromad minus xarajat, so‘m</span></article>
+        </div>
+    </AuthorizeView>
+    <p class="muted">Bu sahifa kassa reestri: davrdagi barcha tushum va xarajatlar. O‘quvchi to‘lovini uning profilidan qabul qilish qulayroq — guruh, chek va balans avtomatik bog‘lanadi.</p>
+    <div class="filter-bar expense-filters">
+        <div><label class="field-label" for="expense-from">Boshlanish sanasi</label><input @bind="fromDate" @bind:after="LoadTransactions" id="expense-from" type="date" class="form-control" /></div>
+        <div><label class="field-label" for="expense-to">Tugash sanasi</label><input @bind="toDate" @bind:after="LoadTransactions" id="expense-to" type="date" class="form-control" /></div>
+        <div><label class="field-label" for="expense-branch">Filial</label><select @bind="branchFilter" @bind:after="LoadTransactions" id="expense-branch" class="form-select">
+            <option value="">Barcha filiallar</option>
+            @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+        </select></div>
+    </div>
+    <div class="workspace-grid branch-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">MOLIYA REESTRI</p><h2>@transactions.Count ta qayd</h2></div></div>
+            @if (transactions.Count == 0)
+            {
+                <p class="muted">Tanlangan davrda moliya qaydlari yo‘q.</p>
+            }
+            else
+            {
+                <div class="table-panel"><table class="data-table">
+                    <thead><tr><th>SANA</th><th>TURI / KATEGORIYA</th><th>O‘QUVCHI</th><th>FILIAL</th><th>SUMMA</th><th>TO‘LOV USULI</th><th>IZOH</th></tr></thead>
+                    <tbody>@foreach (var item in transactions)
+                    {
+                        <tr>
+                            <td>@item.Date.ToString("dd.MM.yyyy")</td>
+                            <td><strong>@(item.Type == FinancialTransactionType.Income ? "Daromad" : "Xarajat")</strong><br /><span class="muted">@item.Category</span></td>
+                            <td>@(item.StudentName ?? "—")</td>
+                            <td>@item.BranchName</td>
+                            <td>@item.Amount.ToString("N0") so‘m</td>
+                            <td>@MethodName(item.PaymentMethod)</td>
+                            <td>@item.Note</td>
+                        </tr>
+                    }</tbody>
+                </table></div>
+            }
+        </section>
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">YANGI MOLIYA QAYDI</p><h2>Daromad yoki xarajat</h2></div></div>
+            @if (branches.Count == 0)
+            {
+                <p class="muted">Moliya qaydi kiritish uchun faol filial kerak.</p>
+            }
+            else
+            {
+                <EditForm Model="input" OnValidSubmit="SaveTransaction" FormName="new-financial-transaction">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="validation-summary" />
+                    <label class="field-label" for="transaction-type">Amal turi</label>
+                    <InputSelect @bind-Value="input.Type" @bind-Value:after="OnTypeChanged" id="transaction-type" class="form-select">
+                        <option value="@FinancialTransactionType.Income">Daromad / tushum</option>
+                        <option value="@FinancialTransactionType.Expense">Xarajat</option>
+                    </InputSelect>
+                    @if (input.Type == FinancialTransactionType.Income)
+                    {
+                        <label class="field-label" for="transaction-student">O‘quvchi to‘lovi <span class="muted">(ixtiyoriy)</span></label>
+                        <InputSelect @bind-Value="input.StudentId" id="transaction-student" class="form-select">
+                            <option value="">Umumiy tushum — o‘quvchiga bog‘lanmagan</option>
+                            @foreach (var student in students.Where(item => item.BranchId == input.BranchId))
+                            {
+                                <option value="@student.Id">@student.FullName</option>
+                            }
+                        </InputSelect>
+                    }
+                    @if (input.StudentId is null)
+                    {
+                        <label class="field-label" for="transaction-category">Kategoriya</label>
+                        <InputText @bind-Value="input.Category" id="transaction-category" class="form-control" list="expense-categories" placeholder="Ro‘yxatdan tanlang yoki yozing" />
+                        <datalist id="expense-categories">
+                            @foreach (var category in ExpenseCategories.Standard) { <option value="@category"></option> }
+                        </datalist>
+                        <ValidationMessage For="() => input.Category" />
+                        @if (input.Type == FinancialTransactionType.Expense && !string.IsNullOrWhiteSpace(input.Category) && !ExpenseCategories.IsKnown(input.Category))
+                        {
+                            <p class="muted" style="margin-top:6px">Ro‘yxatda yo‘q turkum — izohda bu xarajat nima ekanini yozing.</p>
+                        }
+                    }
+                    else
+                    {
+                        <p class="notice">Ushbu qayd “O‘quvchi to‘lovi” daromadi sifatida tanlangan o‘quvchiga bog‘lanadi. Ustoz ulushi hisoblanishi uchun to‘lovni <a class="text-link-strong" href="/oquvchilar/@input.StudentId">o‘quvchi profilidan</a> guruh tanlab qabul qiling.</p>
+                    }
+                    <label class="field-label" for="transaction-amount">Summa (so‘m)</label>
+                    <InputNumber @bind-Value="input.Amount" id="transaction-amount" class="form-control" />
+                    <ValidationMessage For="() => input.Amount" />
+                    <label class="field-label" for="transaction-date">Sana</label>
+                    <InputDate @bind-Value="input.Date" id="transaction-date" class="form-control" />
+                    <label class="field-label" for="transaction-method">To‘lov usuli</label>
+                    <InputSelect @bind-Value="input.PaymentMethod" id="transaction-method" class="form-select">
+                        <option value="@PaymentMethod.Cash">Naqd</option>
+                        <option value="@PaymentMethod.Card">Karta</option>
+                        <option value="@PaymentMethod.Terminal">Terminal</option>
+                        <option value="@PaymentMethod.BankTransfer">Bank o‘tkazmasi</option>
+                    </InputSelect>
+                    <label class="field-label" for="transaction-branch">Filial</label>
+                    <InputSelect @bind-Value="input.BranchId" @bind-Value:after="OnBranchChanged" id="transaction-branch" class="form-select">
+                        @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+                    </InputSelect>
+                    <label class="field-label" for="transaction-note">Izoh <span class="muted">(ixtiyoriy)</span></label>
+                    <InputText @bind-Value="input.Note" id="transaction-note" class="form-control" />
+                    <ValidationMessage For="() => input.Note" />
+                    <button class="btn btn-primary form-submit" type="submit">Qaydni saqlash</button>
+                </EditForm>
+            }
+        </section>
+    </div>
+</section>
+
+@code {
+    private readonly FinancialTransactionInput input = new();
+    private IReadOnlyList<Branch> branches = [];
+    private IReadOnlyList<Student> students = [];
+    private IReadOnlyList<FinancialTransactionSummary> transactions = [];
+    private DateTime fromDate = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime toDate = DateTime.Today;
+    private string branchFilter = "";
+    private string? message;
+    private bool isError;
+    private decimal netAmount =>
+        transactions.Where(item => item.Type == FinancialTransactionType.Income).Sum(item => item.Amount) -
+        transactions.Where(item => item.Type == FinancialTransactionType.Expense).Sum(item => item.Amount);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+            students = await CenterData.GetStudentsAsync();
+            if (branches.Count > 0)
+            {
+                input.BranchId = branches[0].Id;
+            }
+            await LoadTransactions();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void OnTypeChanged()
+    {
+        if (input.Type == FinancialTransactionType.Expense)
+        {
+            input.StudentId = null;
+        }
+    }
+
+    private void OnBranchChanged()
+    {
+        input.StudentId = null;
+    }
+
+    private async Task LoadTransactions()
+    {
+        var from = DateOnly.FromDateTime(fromDate);
+        var to = DateOnly.FromDateTime(toDate);
+        if (to < from)
+        {
+            SetMessage("Tugash sanasi boshlanish sanasidan oldin bo‘lmasin.", true);
+            return;
+        }
+        try
+        {
+            int? selectedBranch = int.TryParse(branchFilter, out var parsedBranch) ? parsedBranch : null;
+            transactions = await CenterData.GetFinancialTransactionsAsync(from, to, selectedBranch);
+            message = null;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task SaveTransaction()
+    {
+        try
+        {
+            await CenterData.AddFinancialTransactionAsync(
+                input.Type,
+                input.BranchId,
+                input.StudentId,
+                input.Date,
+                input.Category,
+                input.Amount,
+                input.PaymentMethod,
+                input.Note);
+            input.Category = "";
+            input.Amount = 0;
+            input.Note = "";
+            input.StudentId = null;
+            await LoadTransactions();
+            SetMessage("Moliya qaydi saqlandi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Moliya qaydini saqlab bo‘lmadi." : exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string MethodName(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Naqd",
+        PaymentMethod.Card => "Karta",
+        PaymentMethod.Terminal => "Terminal",
+        _ => "Bank o‘tkazmasi"
+    };
+
+    private sealed class FinancialTransactionInput
+    {
+        [Required(ErrorMessage = "Kategoriyani kiriting.")]
+        [StringLength(120, MinimumLength = 2)]
+        public string Category { get; set; } = "";
+
+        [Range(typeof(decimal), "1", "999999999", ErrorMessage = "Summani 1 va 999 999 999 orasida kiriting.")]
+        public decimal Amount { get; set; }
+
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public FinancialTransactionType Type { get; set; } = FinancialTransactionType.Income;
+        public PaymentMethod PaymentMethod { get; set; }
+        public int BranchId { get; set; }
+        public int? StudentId { get; set; }
+
+        [StringLength(500)]
+        public string Note { get; set; } = "";
+    }
+}

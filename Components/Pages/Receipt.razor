@@ -1,0 +1,60 @@
+@page "/chek/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Cash)]
+@using System.Globalization
+@inject StudentAccountService Accounts
+@inject IJSRuntime JS
+
+<PageTitle>Chek #@Id — EduHisob</PageTitle>
+
+@if (!string.IsNullOrEmpty(error))
+{
+    <div class="notice notice-error">@error</div>
+}
+else if (receipt is null)
+{
+    <div class="notice">Yuklanmoqda...</div>
+}
+else
+{
+    <div class="receipt">
+        <h1>@receipt.CenterName</h1>
+        <p class="receipt-sub">@receipt.BranchName · To‘lov cheki №@receipt.Id</p>
+        <div class="receipt-row"><span>Sana</span><span>@receipt.Date.ToString("dd.MM.yyyy")</span></div>
+        <div class="receipt-row"><span>O‘quvchi</span><span>@receipt.StudentName</span></div>
+        <div class="receipt-row"><span>Telefon</span><span>@receipt.StudentPhone</span></div>
+        @if (receipt.GroupName is not null) { <div class="receipt-row"><span>Guruh</span><span>@receipt.GroupName</span></div> }
+        <div class="receipt-row"><span>To‘lov usuli</span><span>@StudentAccountService.PaymentMethodLabel(receipt.Method)</span></div>
+        @if (!string.IsNullOrEmpty(receipt.Note)) { <div class="receipt-row"><span>Izoh</span><span>@receipt.Note</span></div> }
+        <div class="receipt-row receipt-total"><span>Summa</span><span>@Money(receipt.Amount)</span></div>
+        <div class="receipt-row"><span>Joriy balans</span><span>@Money(receipt.BalanceNow)</span></div>
+        <div class="receipt-row"><span>Qabul qildi</span><span>@(string.IsNullOrEmpty(receipt.Cashier) ? "—" : receipt.Cashier)</span></div>
+        <p class="receipt-footer">To‘lovingiz uchun rahmat!</p>
+    </div>
+    <div class="inline-actions no-print" style="justify-content:center;margin-top:16px">
+        <button class="btn btn-primary" @onclick="Print">Chop etish</button>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private static readonly CultureInfo Uz = CultureInfo.GetCultureInfo("uz-Latn-UZ");
+    private PaymentReceipt? receipt;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            receipt = await Accounts.GetReceiptAsync(Id);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            error = exception.Message;
+        }
+    }
+
+    private async Task Print() => await JS.InvokeVoidAsync("print");
+
+    private static string Money(decimal value) => $"{value.ToString("N0", Uz)} so‘m";
+}

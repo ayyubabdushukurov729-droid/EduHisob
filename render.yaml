@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: eduhisob
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: data-protection-keys
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: DatabaseProvider
+        value: PostgreSQL
+      - key: Registration__Enabled
+        value: "false"
+      - key: DataProtection__KeysPath
+        value: /data/keys
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eduhisob-db
+          property: connectionString
+
+databases:
+  - name: eduhisob-db
+    databaseName: eduhisob
+    user: eduhisob
+    plan: basic-256mb
+    region: frankfurt
+    ipAllowList: []

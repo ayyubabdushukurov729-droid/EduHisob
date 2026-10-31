@@ -1,0 +1,32 @@
+﻿@if (!string.IsNullOrEmpty(DisplayMessage))
+{
+    @* Xabar muvaffaqiyat so'zlari bilan bo'lsa yashil, aks holda xato (qizil). *@
+    var statusMessageClass = SuccessWords.Any(word => DisplayMessage.Contains(word, StringComparison.OrdinalIgnoreCase)) && !DisplayMessage.StartsWith("Xato") && !DisplayMessage.StartsWith("Error") ? "success" : "danger";
+    <div class="alert alert-@statusMessageClass" role="alert">
+        @DisplayMessage
+    </div>
+}
+
+@code {
+    private static readonly string[] SuccessWords = ["o‘zgartirildi", "yangilandi", "saqlandi", "tasdiqlandi", "yuborildi", "has been"];
+
+    private string? messageFromCookie;
+
+    [Parameter]
+    public string? Message { get; set; }
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private string? DisplayMessage => Message ?? messageFromCookie;
+
+    protected override void OnInitialized()
+    {
+        messageFromCookie = HttpContext.Request.Cookies[IdentityRedirectManager.StatusCookieName];
+
+        if (messageFromCookie is not null)
+        {
+            HttpContext.Response.Cookies.Delete(IdentityRedirectManager.StatusCookieName);
+        }
+    }
+}

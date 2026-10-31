@@ -1,0 +1,8 @@
+.git
+.vs
+bin
+obj
+Data/*.db
+Data/*.db-shm
+Data/*.db-wal
+.env

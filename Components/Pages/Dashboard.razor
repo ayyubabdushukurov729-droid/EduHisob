@@ -1,0 +1,142 @@
+@page "/boshqaruv"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using System.Globalization
+@using Microsoft.AspNetCore.Components
+@inject CenterDataService CenterData
+
+<PageTitle>Bosh sahifa — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">MARKAZINGIZ</p><h1>@summary!.CenterName</h1><p class="muted">Bugungi faoliyat ko‘rsatkichlari</p></div>
+        <a class="btn btn-primary" href="/oquvchilar/yangi">+ O‘quvchi qo‘shish</a>
+    </div>
+    @if (loading)
+    {
+        <div class="notice">Ma’lumotlar yuklanmoqda...</div>
+    }
+    else if (!string.IsNullOrEmpty(error))
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+    else
+    {
+        <div class="metric-grid dashboard-metrics">
+            <a class="metric-card" href="/oquvchilar"><span class="metric-icon violet">♙</span><span class="metric-label">Jami o‘quvchilar</span><strong>@summary!.StudentCount</strong><span class="metric-caption">Arxivdagilardan tashqari</span></a>
+            <a class="metric-card" href="/oquvchilar?status=Active"><span class="metric-icon mint">✓</span><span class="metric-label">Faol o‘quvchilar</span><strong>@summary!.ActiveStudents</strong><span class="metric-caption">Faol holatdagilar</span></a>
+            <a class="metric-card" href="/oquvchilar?status=Trial"><span class="metric-icon blue">◷</span><span class="metric-label">Sinovdagilar</span><strong>@summary!.TrialStudents</strong><span class="metric-caption">Sinov holatidagi o‘quvchilar</span></a>
+            <a class="metric-card" href="/oquvchilar?status=Frozen"><span class="metric-icon violet">❄</span><span class="metric-label">Muzlatilganlar</span><strong>@summary!.FrozenStudents</strong><span class="metric-caption">Vaqtincha to‘xtatilgan</span></a>
+            <a class="metric-card" href="/oquvchilar?status=Left"><span class="metric-icon blue">↗</span><span class="metric-label">Ketganlar</span><strong>@summary!.LeftStudents</strong><span class="metric-caption">Faol bo‘lmagan o‘quvchilar</span></a>
+            <a class="metric-card" href="/guruhlar"><span class="metric-icon mint">▣</span><span class="metric-label">Faol guruhlar</span><strong>@summary!.ActiveGroups</strong><span class="metric-caption">Markaz guruhlari</span></a>
+            <a class="metric-card" href="/oquvchilar"><span class="metric-icon violet">＋</span><span class="metric-label">Bu oy qo‘shilgan</span><strong>@summary!.NewStudentsThisMonth</strong><span class="metric-caption">Yangi o‘quvchilar</span></a>
+            <a class="metric-card" href="/filiallar"><span class="metric-icon blue">⌂</span><span class="metric-label">Faol filiallar</span><strong>@branchCount</strong><span class="metric-caption">Markaz filiallari</span></a>
+        </div>
+        @if (finance is not null)
+        {
+            <div class="metric-grid finance-metrics" style="margin-bottom:18px">
+                <a class="metric-card" href="/moliya"><span class="metric-icon mint">↓</span><span class="metric-label">Shu oy xarajati</span><strong>@Money(finance.MonthExpense)</strong><span class="metric-caption">Ish haqi va boshqa barcha xarajatlar</span></a>
+                <a class="metric-card" href="/hisobotlar"><span class="metric-icon blue">=</span><span class="metric-label">Shu oy natijasi</span><strong class="@(finance.MonthResult < 0 ? "money-negative" : "money-positive")">@Money(finance.MonthResult)</strong><span class="metric-caption">Tushum − xarajat (hisobotlardagi bilan bir xil)</span></a>
+                <a class="metric-card" href="/qarzdorlar"><span class="metric-icon violet">⚠</span><span class="metric-label">Qarzdorlar</span><strong class="money-negative">@Money(finance.DebtTotal)</strong><span class="metric-caption">@finance.DebtorCount nafar o‘quvchi</span></a>
+            </div>
+        }
+        <div class="workspace-grid dashboard-insights">
+            <AuthorizeView Roles="@CenterRoles.Finance" Context="r">
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">MOLIYA</p><h2>Shu oy tushumi</h2></div></div>
+                    <strong class="dashboard-highlight">@summary!.CurrentPeriodIncome.ToString("N0", CultureInfo.GetCultureInfo("uz-Latn-UZ")) so‘m</strong>
+                    <p class="muted">O‘tgan oyning shu davri: @summary.PreviousPeriodIncome.ToString("N0", CultureInfo.GetCultureInfo("uz-Latn-UZ")) so‘m@GrowthText()</p>
+                    <a class="text-link" href="/hisobotlar">Moliyaviy hisobotlarni ko‘rish →</a>
+                </section>
+            </AuthorizeView>
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">DAVOMAT</p><h2>Shu oy qatnashish</h2></div></div>
+                @if (summary!.CountedLessons == 0)
+                {
+                    <p class="muted">Bu oy uchun davomat qaydlari yo‘q.</p>
+                }
+                else
+                {
+                    <strong class="dashboard-highlight">@AttendanceRate.ToString("N0")%</strong>
+                    <div class="attendance-progress" role="progressbar" aria-label="Shu oy qatnashish ko‘rsatkichi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@AttendanceRate.ToString("N0", CultureInfo.InvariantCulture)">
+                        <span style="width: @AttendanceRate.ToString("N0", CultureInfo.InvariantCulture)%"></span>
+                    </div>
+                    <p class="muted">@summary.AttendedLessons / @summary.CountedLessons dars qaydida qatnashgan yoki kechikkan</p>
+                }
+                <a class="text-link" href="/davomat">Davomatni boshqarish →</a>
+            </section>
+        </div>
+        <div class="workspace-grid">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">TEZKOR AMALLAR</p><h2>Kundalik boshqaruv</h2></div></div>
+                <div class="quick-links">
+                    <a href="/oquvchilar"><span class="quick-icon violet">♙</span><span><strong>O‘quvchilar</strong><small>Ro‘yxatni boshqaring</small></span><span class="arrow">→</span></a>
+                    <a href="/filiallar"><span class="quick-icon blue">⌂</span><span><strong>Filiallar</strong><small>Filiallarni ko‘ring va qo‘shing</small></span><span class="arrow">→</span></a>
+                    <a href="/guruhlar"><span class="quick-icon violet">▣</span><span><strong>Kurslar va guruhlar</strong><small>Jadval va guruh tarkibini boshqaring</small></span><span class="arrow">→</span></a>
+                    <a href="/davomat"><span class="quick-icon blue">◷</span><span><strong>Davomat</strong><small>Guruh bo‘yicha davomat belgilang</small></span><span class="arrow">→</span></a>
+                    <a href="/xodimlar"><span class="quick-icon violet">♙</span><span><strong>Xodimlar va ustozlar</strong><small>Jamoa hamda kelishilgan oyliklarni boshqaring</small></span><span class="arrow">→</span></a>
+                    <a href="/moliya"><span class="quick-icon violet">◇</span><span><strong>Moliya</strong><small>Daromad, xarajat va ish haqi hisoblari</small></span><span class="arrow">→</span></a>
+                </div>
+            </section>
+            <aside class="panel trial-card"><span class="trial-icon">✳</span><p class="eyebrow">TARIF HOLATI</p><h2>@(trialEndsAtUtc <= DateTime.UtcNow ? "Sinov muddati tugagan" : $"{trialDaysRemaining} kunlik sinov qoldi")</h2><p>Sinov yakuni: @trialEndsAtUtc.ToLocalTime().ToString("dd.MM.yyyy"). Tariflarni boshqarish va to‘lovlarni ulash keyingi bosqichda amalga oshiriladi.</p></aside>
+        </div>
+    }
+</section>
+
+@code {
+    private DashboardSummary? summary;
+    private int trialDaysRemaining;
+    private DateTime trialEndsAtUtc;
+    private string? error;
+    private bool loading = true;
+    private decimal AttendanceRate => summary is null || summary.CountedLessons == 0
+        ? 0
+        : (decimal)summary.AttendedLessons / summary.CountedLessons * 100;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            summary = await CenterData.GetDashboardAsync();
+            try
+            {
+                finance = await CenterData.GetDashboardFinanceAsync();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Moliya ko'rsatkichlari faqat asoschi va buxgalterga ko'rinadi.
+            }
+            trialEndsAtUtc = summary.TrialEndsAtUtc;
+            trialDaysRemaining = Math.Max(0, (int)Math.Ceiling((trialEndsAtUtc - DateTime.UtcNow).TotalDays));
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            error = exception.Message;
+        }
+        catch (InvalidOperationException exception)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private int branchCount => summary?.BranchCount ?? 0;
+    private DashboardFinance? finance;
+
+    private static string Money(decimal amount) => $"{amount.ToString("N0", CultureInfo.GetCultureInfo("uz-Latn-UZ"))} so‘m";
+
+    // O'tgan davr juda kichik bo'lsa (masalan, ma'lumot ko'chirilgan oy) foiz chalg'itadi, shuning uchun ko'rsatilmaydi.
+    private string GrowthText()
+    {
+        if (summary is null || summary.PreviousPeriodIncome <= 0)
+        {
+            return "";
+        }
+
+        var growth = (summary.CurrentPeriodIncome - summary.PreviousPeriodIncome) / summary.PreviousPeriodIncome * 100;
+        return Math.Abs(growth) > 300 ? " · o‘zgarish juda katta, ma’lumotni tekshiring" : $" · {(growth >= 0 ? "+" : "")}{growth:0}%";
+    }
+}

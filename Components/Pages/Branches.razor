@@ -1,0 +1,93 @@
+@page "/filiallar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Management)]
+@inject CenterDataService CenterData
+
+<PageTitle>Filiallar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading"><div><p class="eyebrow">MARKAZ BOSHQARUVI</p><h1>Filiallar</h1><p class="muted">Markazingiz manzillari va faoliyat joylari</p></div></div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    <div class="workspace-grid branch-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">FAOL FILIALLAR</p><h2>@branches.Count ta filial</h2></div></div>
+            @if (branches.Count == 0)
+            {
+                <p class="muted">Hozircha filial mavjud emas.</p>
+            }
+            <div class="branch-list">
+                @foreach (var branch in branches)
+                {
+                    <article class="branch-item"><span class="branch-icon">⌂</span><span><strong>@branch.Name</strong><small>@(string.IsNullOrWhiteSpace(branch.Address) ? "Manzil kiritilmagan" : branch.Address)</small></span><span class="status-badge status-active">Faol</span></article>
+                }
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">YANGI MANZIL</p><h2>Filial qo‘shish</h2></div></div>
+            <EditForm Model="input" OnValidSubmit="SaveBranch" FormName="new-branch">
+                <DataAnnotationsValidator />
+                <label class="field-label" for="branch-name">Filial nomi</label>
+                <InputText @bind-Value="input.Name" id="branch-name" class="form-control" placeholder="Masalan, Chilonzor filiali" />
+                <ValidationMessage For="() => input.Name" />
+                <label class="field-label" for="branch-address">Manzil <span class="muted">(ixtiyoriy)</span></label>
+                <InputText @bind-Value="input.Address" id="branch-address" class="form-control" placeholder="Ko‘cha, bino" />
+                <button class="btn btn-primary form-submit" type="submit">Filialni saqlash</button>
+            </EditForm>
+        </section>
+    </div>
+</section>
+
+@code {
+    private IReadOnlyList<Branch> branches = [];
+    private readonly BranchInput input = new();
+    private string? message;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync() => await LoadBranches();
+
+    private async Task LoadBranches()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            isError = true;
+            message = exception.Message;
+        }
+    }
+
+    private async Task SaveBranch()
+    {
+        try
+        {
+            await CenterData.AddBranchAsync(input.Name, input.Address);
+            input.Name = "";
+            input.Address = "";
+            await LoadBranches();
+            isError = false;
+            message = "Filial muvaffaqiyatli saqlandi.";
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            isError = true;
+            message = exception is Microsoft.EntityFrameworkCore.DbUpdateException
+                ? "Filialni saqlab bo‘lmadi. Bunday nomdagi filial mavjudligini tekshiring."
+                : exception.Message;
+        }
+    }
+
+    private sealed class BranchInput
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Filial nomini kiriting.")]
+        [System.ComponentModel.DataAnnotations.StringLength(120, MinimumLength = 2)]
+        public string Name { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.StringLength(300)]
+        public string Address { get; set; } = "";
+    }
+}

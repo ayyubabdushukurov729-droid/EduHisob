@@ -1,0 +1,100 @@
+@inject NavigationManager Navigation
+
+<div class="sidebar-brand">
+    <a class="brand" href="/boshqaruv"><span class="brand-mark">E</span><span>EduHisob</span></a>
+    <span class="brand-caption">O‘QUV MARKAZI BOSHQARUVI</span>
+</div>
+
+<AuthorizeView>
+    <Authorized>
+        <div class="sidebar-center"><span class="center-avatar">@(DisplayName(context.User).FirstOrDefault().ToString().ToUpperInvariant())</span><span><strong>@DisplayName(context.User)</strong><small>@RoleLabel(context.User)</small></span><span class="center-chevron">⌄</span></div>
+        <nav class="side-nav" aria-label="Asosiy menyu">
+            <span class="nav-section-label">ISH MAYDONI</span>
+            <NavLink href="/boshqaruv" Match="NavLinkMatch.All" class="side-link"><span class="side-icon">⌂</span>Bosh sahifa</NavLink>
+            <NavLink href="/yordamchi" class="side-link side-link-ai"><span class="side-icon">✦</span>Yordamchi</NavLink>
+            <AuthorizeView Roles="@CenterRoles.StudentDesk" Context="r">
+                <NavLink href="/oquvchilar" class="side-link"><span class="side-icon">♙</span>O‘quvchilar</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Cash" Context="r">
+                <NavLink href="/qarzdorlar" class="side-link"><span class="side-icon">⚠</span>Qarzdorlar</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.StudentDesk" Context="r">
+                <NavLink href="/chiqib-ketganlar" class="side-link"><span class="side-icon">↗</span>Chiqib ketganlar</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                <NavLink href="/filiallar" class="side-link"><span class="side-icon">▤</span>Filiallar</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Sales" Context="r">
+                <span class="nav-section-label nav-section-spaced">SOTUV</span>
+                <NavLink href="/sotuv" class="side-link"><span class="side-icon">◎</span>Lidlar</NavLink>
+                <NavLink href="/dars-jadvali?sotuv=1" class="side-link"><span class="side-icon">▦</span>Dars jadvali va bo‘sh joylar</NavLink>
+            </AuthorizeView>
+            <span class="nav-section-label nav-section-spaced">TA’LIM</span>
+            <AuthorizeView Roles="@CenterRoles.StudentDesk" Context="r">
+                <NavLink href="/guruhlar" class="side-link"><span class="side-icon">▣</span>Kurslar va guruhlar</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                <NavLink href="/xonalar" class="side-link"><span class="side-icon">▤</span>Xonalar</NavLink>
+            </AuthorizeView>
+            <NavLink href="/dars-jadvali" class="side-link"><span class="side-icon">▦</span>Dars jadvali</NavLink>
+            <AuthorizeView Roles="@CenterRoles.Teaching" Context="r">
+                <NavLink href="/davomat" class="side-link"><span class="side-icon">◷</span>Davomat</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Hr" Context="r">
+                <span class="nav-section-label nav-section-spaced">JAMOA</span>
+                <NavLink href="/xodimlar" class="side-link"><span class="side-icon">♙</span>Xodimlar</NavLink>
+                @* Kadrlar bo'limi moliya menyusini ko'rmaydi, ish haqiga shu yerdan kiradi. *@
+                <AuthorizeView Roles="@CenterRoles.HrManager" Context="h">
+                    <NavLink href="/ish-haqi" class="side-link"><span class="side-icon">◫</span>Ish haqi</NavLink>
+                </AuthorizeView>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                <NavLink href="/foydalanuvchilar" class="side-link"><span class="side-icon">⚿</span>Foydalanuvchilar</NavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="@CenterRoles.Cash" Context="r">
+                <span class="nav-section-label nav-section-spaced">MOLIYA</span>
+                <details class="finance-nav-group" open="@IsFinancePage">
+                    <summary class="side-link finance-toggle @(IsFinancePage ? "active" : "")">
+                        <span class="side-icon">◇</span>
+                        <span class="finance-toggle-label">Moliya</span>
+                        <span class="finance-chevron" aria-hidden="true">⌄</span>
+                    </summary>
+                    <div class="finance-subnav" id="finance-subnav">
+                        <NavLink href="/moliya" class="side-link finance-sub-link"><span class="side-icon">◇</span>Umumiy moliya</NavLink>
+                        <NavLink href="/kassa" class="side-link finance-sub-link"><span class="side-icon">◈</span>Kassa</NavLink>
+                        <AuthorizeView Roles="@CenterRoles.Finance" Context="f">
+                            <NavLink href="/ish-haqi" class="side-link finance-sub-link"><span class="side-icon">◫</span>Ish haqi</NavLink>
+                            <NavLink href="/ustoz-ulushi" class="side-link finance-sub-link"><span class="side-icon">%</span>Ustozlar ulushi</NavLink>
+                            <NavLink href="/hisobotlar" class="side-link finance-sub-link"><span class="side-icon">▥</span>Hisobotlar</NavLink>
+                        </AuthorizeView>
+                    </div>
+                </details>
+            </AuthorizeView>
+        </nav>
+        <div class="sidebar-bottom">
+            <div class="help-card"><span class="help-icon">?</span><div><strong>Yordam kerakmi?</strong><small>Markaz rahbaringizga murojaat qiling</small></div></div>
+            <a class="side-link" href="Account/Manage/ChangePassword"><span class="side-icon">⚿</span>Parolni o‘zgartirish</a>
+            <form action="Account/Logout" method="post">
+                <AntiforgeryToken />
+                <input type="hidden" name="ReturnUrl" value="" />
+                <button type="submit" class="side-link logout-link"><span class="side-icon">↪</span>Tizimdan chiqish</button>
+            </form>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <nav class="side-nav"><NavLink href="Account/Login" class="side-link">Kirish</NavLink><NavLink href="Account/Register" class="side-link">Markaz ochish</NavLink></nav>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private bool IsFinancePage =>
+        Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0] is "moliya" or "kassa" or "ish-haqi" or "ustoz-ulushi" or "hisobotlar";
+
+    private static string DisplayName(System.Security.Claims.ClaimsPrincipal user) =>
+        user.FindFirst("full_name")?.Value is { Length: > 0 } name ? name : user.Identity?.Name ?? "E";
+
+    private static string RoleLabel(System.Security.Claims.ClaimsPrincipal user) =>
+        Enum.TryParse<CenterRole>(user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value, out var role)
+            ? CenterRoles.Label(role)
+            : "Qayta kiring";
+}

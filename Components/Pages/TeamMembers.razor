@@ -1,0 +1,178 @@
+@page "/foydalanuvchilar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Management)]
+@inject TeamAccessService Team
+
+<PageTitle>Foydalanuvchilar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">JAMOA</p><h1>Foydalanuvchilar va rollar</h1><p class="muted">Har bir xodim o‘z akkaunti bilan kiradi va faqat roliga tegishli bo‘limlarni ko‘radi. Akkauntlarni faqat asoschi boshqaradi.</p></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+
+    <div class="stack-gap">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">AKKAUNTLAR</p><h2>@members.Count(m => m.IsActive) ta faol akkaunt</h2></div></div>
+            <div class="table-panel">
+                <table class="data-table">
+                    <thead><tr><th>XODIM</th><th>ROL</th><th>HOLAT</th><th>OXIRGI MOLIYA AMALI</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var member in members)
+                        {
+                            <tr>
+                                <td><strong>@(string.IsNullOrEmpty(member.FullName) ? "Ism kiritilmagan" : member.FullName)</strong>@(member.IsMe ? " (siz)" : "")<br /><span class="muted">Login: @LoginText(member.Login)</span></td>
+                                <td>
+                                    @if (isOwner && !member.IsMe && member.Role != CenterRole.Owner)
+                                    {
+                                        <select class="form-select" style="min-height:32px;min-width:160px;padding:4px 8px;font-size:12px" value="@member.Role" @onchange="e => ChangeRole(member.UserId, e.Value)">
+                                            @foreach (var role in AssignableRoles) { <option value="@role">@CenterRoles.Label(role)</option> }
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        <span class="chip">@CenterRoles.Label(member.Role)</span>
+                                    }
+                                </td>
+                                <td><span class="status-badge @(member.IsActive ? "status-active" : "status-muted")">@(member.IsActive ? "Faol" : "O‘chirilgan")</span></td>
+                                <td>@(member.LastFinancialActionUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                                <td>
+                                    @if (isOwner && !member.IsMe && member.Role != CenterRole.Owner)
+                                    {
+                                        <div class="inline-actions">
+                                            <button class="btn-link" @onclick="() => ToggleActive(member)">@(member.IsActive ? "O‘chirish" : "Yoqish")</button>
+                                            <button class="btn-link" @onclick="() => { resetUserId = member.UserId; resetPassword = string.Empty; }">Parol</button>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                            @if (resetUserId == member.UserId)
+                            {
+                                <tr><td colspan="5">
+                                    <div class="inline-form">
+                                        <div><input type="text" class="form-control" placeholder="Yangi parol (kamida 8 belgi, 1 raqam)" @bind="resetPassword" /></div>
+                                        <button class="btn btn-primary btn-small" @onclick="ResetPassword">Saqlash</button>
+                                        <button class="btn btn-secondary btn-small" @onclick="() => resetUserId = null">Bekor</button>
+                                    </div>
+                                </td></tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <div class="workspace-grid branch-grid">
+            @if (isOwner)
+            {
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">YANGI AKKAUNT</p><h2>Xodimga kirish ochish</h2></div></div>
+                    <label class="field-label">Ism familiya</label>
+                    <input class="form-control" @bind="newName" placeholder="Masalan: Dilnoza Karimova" />
+                    <label class="field-label">Telefon (shu raqam login bo‘ladi)</label>
+                    <input class="form-control" @bind="newPhone" placeholder="+998 90 123 45 67" />
+                    <label class="field-label">Boshlang‘ich parol</label>
+                    <input type="text" class="form-control" @bind="newPassword" placeholder="Kamida 8 belgi, 1 raqam" />
+                    <label class="field-label">Rol</label>
+                    <select class="form-select" @bind="newRole">
+                        @foreach (var role in AssignableRoles) { <option value="@role">@CenterRoles.Label(role)</option> }
+                    </select>
+                    <p class="muted" style="margin-top:8px">@CenterRoles.Description(newRole)</p>
+                    <button class="btn btn-primary form-submit" @onclick="Create">Akkaunt ochish</button>
+                </section>
+            }
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">ROLLAR</p><h2>Kim nimani ko‘radi</h2></div></div>
+                @foreach (var role in Enum.GetValues<CenterRole>())
+                {
+                    <div class="branch-item"><span class="branch-icon">⚿</span><span><strong>@CenterRoles.Label(role)</strong><small style="white-space:normal">@CenterRoles.Description(role)</small></span></div>
+                }
+            </section>
+        </div>
+    </div>
+</section>
+
+@code {
+    private static readonly CenterRole[] AssignableRoles = Enum.GetValues<CenterRole>().Where(role => role != CenterRole.Owner).ToArray();
+    private IReadOnlyList<TeamMember> members = [];
+    private bool isOwner;
+    private string? message;
+    private bool isError;
+
+    private string newName = "";
+    private string newPhone = "";
+    private string newPassword = "";
+    private CenterRole newRole = CenterRole.Cashier;
+
+    private string? resetUserId;
+    private string resetPassword = "";
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            members = await Team.GetMembersAsync();
+            isOwner = members.Any(m => m.IsMe && m.Role == CenterRole.Owner);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Run(Func<Task> action, string success)
+    {
+        try
+        {
+            await action();
+            SetMessage(success, false);
+            await Load();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Create()
+    {
+        var login = TeamAccessService.PhoneLogin(newPhone);
+        await Run(() => Team.CreateMemberAsync(newName, newPhone, newPassword, newRole), $"Akkaunt ochildi. Xodimga bering — login: {LoginText(login ?? "")}, parol: {newPassword}");
+        if (!isError)
+        {
+            newName = newPhone = newPassword = "";
+        }
+    }
+
+    private Task ChangeRole(string userId, object? value) =>
+        Enum.TryParse<CenterRole>(value?.ToString(), out var role)
+            ? Run(() => Team.ChangeRoleAsync(userId, role), "Rol o‘zgartirildi. Xodim keyingi kirishda yangi ruxsatlarni oladi.")
+            : Task.CompletedTask;
+
+    private Task ToggleActive(TeamMember member) =>
+        Run(() => Team.SetActiveAsync(member.UserId, !member.IsActive), member.IsActive ? "Akkaunt o‘chirildi." : "Akkaunt yoqildi.");
+
+    private async Task ResetPassword()
+    {
+        var userId = resetUserId!;
+        await Run(() => Team.ResetPasswordAsync(userId, resetPassword), "Parol yangilandi.");
+        if (!isError) resetUserId = null;
+    }
+
+    // Telefon login "998901234567" ko'rinishida saqlanadi, ekranda "+998 90 123 45 67" bo'lib chiqadi.
+    private static string LoginText(string login) =>
+        login.Length == 12 && login.All(char.IsDigit)
+            ? $"+{login[..3]} {login[3..5]} {login[5..8]} {login[8..10]} {login[10..]}"
+            : login;
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+}

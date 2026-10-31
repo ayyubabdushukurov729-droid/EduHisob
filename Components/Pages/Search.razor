@@ -1,0 +1,74 @@
+@page "/qidiruv"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject GlobalSearchService SearchService
+@inject NavigationManager Navigation
+
+<PageTitle>Qidiruv — EduHisob</PageTitle>
+
+<section class="workspace narrow-workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">QIDIRUV</p><h1>Umumiy qidiruv</h1><p class="muted">O‘quvchi, telefon raqami, guruh, ustoz, lid yoki sahifa nomi bo‘yicha.</p></div>
+    </div>
+    <div class="filter-bar">
+        <input class="form-control search-input" style="max-width:none" @bind="query" @bind:event="oninput" @onkeyup="OnKeyUp" placeholder="Kamida 2 ta belgi" aria-label="Qidiruv" autofocus />
+        <button class="btn btn-primary" @onclick="Run">Qidirish</button>
+    </div>
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+    else if (result is not null)
+    {
+        if (result.Query.Length < 2)
+        {
+            <div class="notice">Qidirish uchun kamida 2 ta belgi kiriting.</div>
+        }
+        else if (result.IsEmpty)
+        {
+            <div class="empty-state"><span class="empty-icon">⌕</span><h2>“@result.Query” bo‘yicha hech narsa topilmadi</h2><p>Ism yoki telefonning boshqa qismini yozib ko‘ring.</p></div>
+        }
+        else
+        {
+            <SearchHitGroup Title="Sahifalar" Hits="result.Pages" />
+            <SearchHitGroup Title="O‘quvchilar" Hits="result.Students" />
+            <SearchHitGroup Title="Guruhlar" Hits="result.Groups" />
+            <SearchHitGroup Title="Xodimlar" Hits="result.Employees" />
+            <SearchHitGroup Title="Lidlar" Hits="result.Leads" />
+        }
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+
+    private string query = "";
+    private GlobalSearchResult? result;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        query = Q ?? "";
+        await Run();
+    }
+
+    private async Task OnKeyUp(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await Run();
+    }
+
+    private async Task Run()
+    {
+        try
+        {
+            result = await SearchService.SearchAsync(query);
+            error = null;
+            var uri = Navigation.GetUriWithQueryParameter("q", query);
+            if (uri != Navigation.Uri) Navigation.NavigateTo(uri, replace: true);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            error = exception.Message;
+        }
+    }
+}

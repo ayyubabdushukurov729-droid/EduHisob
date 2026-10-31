@@ -1,0 +1,226 @@
+@page "/ish-haqi"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Hr)]
+@using System.ComponentModel.DataAnnotations
+@inject CenterDataService CenterData
+
+<PageTitle>Ish haqi — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">MOLIYA VA HR</p><h1>Ish haqi</h1><p class="muted">Hisoblangan = oylik + ustoz ulushi (shu oyda guruhlari uchun qabul qilingan to‘lovlar × guruhdagi foiz) + bonus. Ustoz sxemasi (oylik, foiz yoki ikkalasi) Xodimlar sahifasida tanlanadi. Avans va to‘lovlar ayiriladi.</p></div>
+        <div class="month-picker"><label class="field-label" for="payroll-month">Hisob oyi</label><input @bind="selectedMonth" @bind:after="LoadMonth" id="payroll-month" type="month" class="form-control" /></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    @if (summaries.Count == 0)
+    {
+        <div class="empty-state"><span class="empty-icon">♙</span><h2>Faol xodimlar yo‘q</h2><p>Ish haqi yuritish uchun avval xodim yoki ustoz qo‘shing.</p><a class="btn btn-primary" href="/xodimlar">Xodim qo‘shish</a></div>
+    }
+    else
+    {
+        <div class="metric-grid payroll-metrics">
+            <article class="metric-card"><span class="metric-label">Kelishilgan oylik + ulush</span><strong>@summaries.Sum(item => item.AgreedMonthlySalary + item.RevenueShare).ToString("N0")</strong><span class="metric-caption">shundan ustoz ulushi: @summaries.Sum(item => item.RevenueShare).ToString("N0") so‘m</span></article>
+            <article class="metric-card"><span class="metric-label">Bonuslar</span><strong>@summaries.Sum(item => item.Bonuses).ToString("N0")</strong><span class="metric-caption">so‘m</span></article>
+            <article class="metric-card"><span class="metric-label">Jami berilgan</span><strong>@summaries.Sum(item => item.Advances + item.SalaryPayments).ToString("N0")</strong><span class="metric-caption">avans va ish haqi</span></article>
+            <article class="metric-card"><span class="metric-label">Qolgan summa</span><strong>@summaries.Sum(item => item.Remaining).ToString("N0")</strong><span class="metric-caption">so‘m</span></article>
+        </div>
+        <div class="workspace-grid branch-grid">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">HISOBOT</p><h2>@summaries.Count nafar xodim</h2></div></div>
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead><tr><th>XODIM</th><th>KELISHILGAN</th><th>ULUSH (TUSHUMDAN)</th><th>BONUS</th><th>AVANS</th><th>ISH HAQI TO‘LOVI</th><th>QOLGAN</th><th>TARIX</th></tr></thead>
+                        <tbody>
+                            @foreach (var item in summaries)
+                            {
+                                <tr>
+                                    <td><strong>@item.FullName</strong><br /><span class="muted">@item.Position · @(item.Role == EmployeeRole.Teacher ? PayTypeName(item.PayType) : "Xodim")</span></td>
+                                    <td>@(item.PayType == EmployeePayType.ShareOnly ? "—" : item.AgreedMonthlySalary.ToString("N0"))</td>
+                                    <td>@(item.PayType == EmployeePayType.SalaryOnly || item.Role == EmployeeRole.Staff ? "—" : item.RevenueShare.ToString("N0"))</td>
+                                    <td>@item.Bonuses.ToString("N0")</td>
+                                    <td>@item.Advances.ToString("N0")</td>
+                                    <td>@item.SalaryPayments.ToString("N0")</td>
+                                    <td><strong>@item.Remaining.ToString("N0") so‘m</strong></td>
+                                    <td><button type="button" class="btn btn-secondary btn-small" @onclick="() => ShowHistory(item.EmployeeId)">Ko‘rish</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">QO‘LDA QAYD ETISH</p><h2>Bonus, avans yoki to‘lov</h2></div></div>
+                <EditForm Model="input" OnValidSubmit="SaveEntry" FormName="new-payroll-entry">
+                    <DataAnnotationsValidator />
+                    <label class="field-label" for="payroll-employee">Xodim</label>
+                    <InputSelect @bind-Value="input.EmployeeId" id="payroll-employee" class="form-select">
+                        @foreach (var item in summaries) { <option value="@item.EmployeeId">@item.FullName</option> }
+                    </InputSelect>
+                    <label class="field-label" for="payroll-type">Amal turi</label>
+                    <InputSelect @bind-Value="input.Type" id="payroll-type" class="form-select" @bind-Value:after="OnTypeChanged">
+                        <option value="@PayrollEntryType.Bonus">Bonus (hisobga qo‘shish)</option>
+                        <option value="@PayrollEntryType.Advance">Avans berish</option>
+                        <option value="@PayrollEntryType.SalaryPayment">Ish haqi to‘lash</option>
+                    </InputSelect>
+                    <label class="field-label" for="payroll-amount">Summa (so‘m)</label>
+                    <InputNumber @bind-Value="input.Amount" id="payroll-amount" class="form-control" />
+                    <ValidationMessage For="() => input.Amount" />
+                    <label class="field-label" for="payroll-date">Sana</label>
+                    <InputDate @bind-Value="input.EntryDate" id="payroll-date" class="form-control" />
+                    @if (input.Type != PayrollEntryType.Bonus)
+                    {
+                        <label class="field-label" for="payroll-method">To‘lov usuli</label>
+                        <InputSelect @bind-Value="input.PaymentMethod" id="payroll-method" class="form-select">
+                            <option value="@PaymentMethod.Cash">Naqd</option>
+                            <option value="@PaymentMethod.Card">Karta</option>
+                            <option value="@PaymentMethod.Terminal">Terminal</option>
+                            <option value="@PaymentMethod.BankTransfer">Bank o‘tkazmasi</option>
+                        </InputSelect>
+                    }
+                    <label class="field-label" for="payroll-note">Izoh <span class="muted">(ixtiyoriy)</span></label>
+                    <InputText @bind-Value="input.Note" id="payroll-note" class="form-control" />
+                    <button class="btn btn-primary form-submit" type="submit">Qaydni saqlash</button>
+                </EditForm>
+            </section>
+        </div>
+        @if (historyEmployeeId is not null)
+        {
+            <section class="panel history-panel">
+                <div class="panel-heading"><div><p class="eyebrow">TANLANGAN OY</p><h2>@historyEmployeeName — to‘lovlar tarixi</h2></div><button class="btn btn-secondary btn-small" @onclick="CloseHistory">Yopish</button></div>
+                @if (history.Count == 0)
+                {
+                    <p class="muted">Bu oy uchun qaydlar yo‘q.</p>
+                }
+                else
+                {
+                    <div class="table-panel"><table class="data-table">
+                        <thead><tr><th>SANA</th><th>AMAL</th><th>SUMMA</th><th>USUL</th><th>IZOH</th></tr></thead>
+                        <tbody>@foreach (var entry in history)
+                        {
+                            <tr><td>@entry.EntryDate.ToString("dd.MM.yyyy")</td><td>@EntryName(entry.Type)</td><td>@entry.Amount.ToString("N0") so‘m</td><td>@(entry.PaymentMethod is null ? "—" : MethodName(entry.PaymentMethod.Value))</td><td>@entry.Note</td></tr>
+                        }</tbody>
+                    </table></div>
+                }
+            </section>
+        }
+    }
+</section>
+
+@code {
+    private readonly PayrollInput input = new();
+    private IReadOnlyList<EmployeePayrollSummary> summaries = [];
+    private IReadOnlyList<PayrollEntrySummary> history = [];
+    private DateTime selectedMonth = DateTime.Today;
+    private DateOnly payrollMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private int? historyEmployeeId;
+    private string historyEmployeeName = "";
+    private string? message;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync() => await LoadMonth();
+
+    private async Task LoadMonth()
+    {
+        payrollMonth = new DateOnly(selectedMonth.Year, selectedMonth.Month, 1);
+
+        try
+        {
+            summaries = await CenterData.GetPayrollSummaryAsync(payrollMonth);
+            if (summaries.Count > 0 && !summaries.Any(item => item.EmployeeId == input.EmployeeId))
+                input.EmployeeId = summaries[0].EmployeeId;
+            if (historyEmployeeId is not null)
+                await ShowHistory(historyEmployeeId.Value);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void OnTypeChanged()
+    {
+        if (input.Type == PayrollEntryType.Bonus) input.PaymentMethod = PaymentMethod.Cash;
+    }
+
+    private async Task SaveEntry()
+    {
+        try
+        {
+            await CenterData.AddPayrollEntryAsync(
+                input.EmployeeId,
+                payrollMonth,
+                input.EntryDate,
+                input.Type,
+                input.Amount,
+                input.Type == PayrollEntryType.Bonus ? null : input.PaymentMethod,
+                input.Note);
+            input.Amount = 0;
+            input.Note = "";
+            await LoadMonth();
+            SetMessage(input.Type == PayrollEntryType.Bonus ? "Bonus hisobga qo‘shildi." : "To‘lov qayd etildi va moliya xarajatlariga yozildi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Qaydni saqlab bo‘lmadi." : exception.Message, true);
+        }
+    }
+
+    private async Task ShowHistory(int employeeId)
+    {
+        try
+        {
+            historyEmployeeId = employeeId;
+            historyEmployeeName = summaries.FirstOrDefault(item => item.EmployeeId == employeeId)?.FullName ?? "";
+            history = await CenterData.GetPayrollEntriesAsync(employeeId, payrollMonth);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void CloseHistory() => historyEmployeeId = null;
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string EntryName(PayrollEntryType type) => type switch
+    {
+        PayrollEntryType.Bonus => "Bonus",
+        PayrollEntryType.Advance => "Avans",
+        _ => "Ish haqi to‘lovi"
+    };
+
+    private static string PayTypeName(EmployeePayType type) => type switch
+    {
+        EmployeePayType.SalaryOnly => "Ustoz · faqat oylik",
+        EmployeePayType.ShareOnly => "Ustoz · faqat foiz",
+        _ => "Ustoz · oylik + foiz"
+    };
+
+    private static string MethodName(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Naqd",
+        PaymentMethod.Card => "Karta",
+        PaymentMethod.Terminal => "Terminal",
+        _ => "Bank o‘tkazmasi"
+    };
+
+    private sealed class PayrollInput
+    {
+        public int EmployeeId { get; set; }
+        public PayrollEntryType Type { get; set; }
+        [Range(typeof(decimal), "1", "999999999", ErrorMessage = "Summani 1 dan katta qilib kiriting.")]
+        public decimal Amount { get; set; }
+        public PaymentMethod PaymentMethod { get; set; }
+        public DateOnly EntryDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        [StringLength(500)]
+        public string Note { get; set; } = "";
+    }
+}

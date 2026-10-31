@@ -1,0 +1,120 @@
+@page "/oquvchilar/yangi"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.StudentDesk)]
+@inject CenterDataService CenterData
+@inject StudentAccountService Accounts
+@inject NavigationManager Navigation
+
+<PageTitle>Yangi o‘quvchi — EduHisob</PageTitle>
+
+<section class="workspace narrow-workspace">
+    <a class="back-link" href="/oquvchilar">← O‘quvchilar ro‘yxatiga</a>
+    <div class="page-heading"><div><p class="eyebrow">MARKAZ BOSHQARUVI</p><h1>Yangi o‘quvchi</h1><p class="muted">O‘quvchi ma’lumotlarini kiriting</p></div></div>
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+    @if (branches.Count == 0 && string.IsNullOrEmpty(error))
+    {
+        <div class="notice">Faol filial topilmadi. Avval filial qo‘shing.</div>
+    }
+    else
+    {
+        <EditForm Model="student" OnValidSubmit="SaveStudent" FormName="new-student" class="form-panel">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="validation-summary" role="alert" />
+            <label class="field-label" for="student-name">Ism familiya</label>
+            <InputText @bind-Value="student.FullName" id="student-name" class="form-control" autocomplete="name" />
+            <ValidationMessage For="() => student.FullName" />
+            <label class="field-label" for="student-phone">Telefon raqami</label>
+            <InputText @bind-Value="student.Phone" id="student-phone" class="form-control" autocomplete="tel" placeholder="+998 90 123 45 67" />
+            <ValidationMessage For="() => student.Phone" />
+            <div class="form-columns">
+                <div>
+                    <label class="field-label" for="student-parent">Ota-ona telefoni <span class="muted">(ixtiyoriy)</span></label>
+                    <InputText @bind-Value="student.ParentPhone" id="student-parent" class="form-control" placeholder="+998 ..." />
+                </div>
+                <div>
+                    <label class="field-label" for="student-birth">Tug‘ilgan sana <span class="muted">(ixtiyoriy)</span></label>
+                    <InputDate @bind-Value="student.BirthDate" id="student-birth" class="form-control" />
+                </div>
+            </div>
+            <label class="field-label" for="student-branch">Filial</label>
+            <InputSelect @bind-Value="student.BranchId" id="student-branch" class="form-select">
+                <option value="0">Filialni tanlang</option>
+                @foreach (var branch in branches)
+                {
+                    <option value="@branch.Id">@branch.Name</option>
+                }
+            </InputSelect>
+            <label class="field-label" for="student-status">Holati</label>
+            <InputSelect @bind-Value="student.Status" id="student-status" class="form-select">
+                <option value="@StudentStatus.Trial">Sinov (to‘lov hisoblanmaydi)</option>
+                <option value="@StudentStatus.Active">Faol</option>
+            </InputSelect>
+            <label class="field-label" for="student-notes">Izoh <span class="muted">(ixtiyoriy)</span></label>
+            <InputTextArea @bind-Value="student.Notes" id="student-notes" class="form-control" rows="3" />
+            @if (duplicates.Count > 0)
+            {
+                <div class="notice notice-error section-gap" role="alert">
+                    <strong>Ehtimol, bu o‘quvchi allaqachon bor:</strong>
+                    <ul style="margin:6px 0 0;padding-left:18px">
+                        @foreach (var duplicate in duplicates)
+                        {
+                            <li><a class="text-link-strong" href="/oquvchilar/@duplicate.Id" target="_blank">@duplicate.FullName</a> — @duplicate.Phone</li>
+                        }
+                    </ul>
+                    <p style="margin:8px 0 0">Agar bu boshqa odam bo‘lsa (masalan, aka-uka bir xil raqam bilan), “Baribir saqlash”ni bosing.</p>
+                </div>
+            }
+            <div class="form-actions"><a class="btn btn-secondary" href="/oquvchilar">Bekor qilish</a><button class="btn btn-primary" type="submit">@(duplicates.Count > 0 ? "Baribir saqlash" : "O‘quvchini saqlash")</button></div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Branch> branches = [];
+    private readonly Student student = new() { Status = StudentStatus.Trial };
+    private IReadOnlyList<DuplicateCandidate> duplicates = [];
+    private string? checkedKey;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            error = exception.Message;
+        }
+    }
+
+    private async Task SaveStudent()
+    {
+        try
+        {
+            // Birinchi bosishda dublikat tekshiriladi; ogohlantirishdan keyin xuddi shu ma'lumot bilan qayta bosilsa saqlanadi.
+            var key = $"{student.FullName.Trim()}|{student.Phone.Trim()}";
+            if (checkedKey != key)
+            {
+                duplicates = await Accounts.FindDuplicatesAsync(student.Phone, student.FullName);
+                checkedKey = key;
+                if (duplicates.Count > 0)
+                {
+                    return;
+                }
+            }
+
+            await CenterData.AddStudentAsync(student);
+            Navigation.NavigateTo($"/oquvchilar/{student.Id}");
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            error = exception is Microsoft.EntityFrameworkCore.DbUpdateException
+                ? "O‘quvchini saqlab bo‘lmadi. Ma’lumotlarni tekshirib, qayta urinib ko‘ring."
+                : exception.Message;
+        }
+    }
+}

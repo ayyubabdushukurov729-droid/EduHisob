@@ -1,0 +1,116 @@
+@page "/platforma/tolovlar"
+@layout PlatformLayout
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = PlatformAdminDataService.Policy)]
+@inject PlatformAdminDataService Platform
+
+<PageTitle>Obuna to‘lovlari — Platforma</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">PLATFORMA</p>
+            <h1>Obuna to‘lovlari</h1>
+            <p class="muted">Markazlardan olingan barcha to‘lovlar. Yangi to‘lov markaz sahifasida yoziladi.</p>
+        </div>
+    </div>
+
+    <div class="filter-bar expense-filters">
+        <div><label class="field-label" for="pp-from">Dan</label><input id="pp-from" type="date" class="form-control" @bind="from" @bind:after="LoadAsync" /></div>
+        <div><label class="field-label" for="pp-to">Gacha</label><input id="pp-to" type="date" class="form-control" @bind="to" @bind:after="LoadAsync" /></div>
+        <button class="btn btn-secondary" @onclick="() => SetRange(0)">Bu oy</button>
+        <button class="btn btn-secondary" @onclick="() => SetRange(-1)">O‘tgan oy</button>
+        <button class="btn btn-secondary" @onclick="ThisYear">Bu yil</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+    else if (payments is not null)
+    {
+        <div class="metric-grid finance-metrics">
+            <article class="metric-card"><span class="metric-label">Jami tushum</span><strong>@PlatformHome.Money(payments.Sum(p => p.Amount))</strong><span class="metric-caption">@payments.Count ta to‘lov</span></article>
+            <article class="metric-card"><span class="metric-label">To‘lagan markazlar</span><strong>@payments.Select(p => p.CenterId).Distinct().Count()</strong><span class="metric-caption">tanlangan davrda</span></article>
+            <article class="metric-card"><span class="metric-label">O‘rtacha to‘lov</span><strong>@PlatformHome.Money(payments.Count == 0 ? 0 : Math.Round(payments.Average(p => p.Amount)))</strong><span class="metric-caption">bitta to‘lov</span></article>
+        </div>
+
+        @if (payments.Count == 0)
+        {
+            <div class="empty-state"><span class="empty-icon">◈</span><h2>Bu davrda to‘lov yo‘q</h2><p>Boshqa davrni tanlang.</p></div>
+        }
+        else
+        {
+            <div class="chip-row">
+                @foreach (var group in payments.GroupBy(p => p.Method).OrderByDescending(g => g.Sum(p => p.Amount)))
+                {
+                    <span class="chip">@MethodName(group.Key): @PlatformHome.Money(group.Sum(p => p.Amount))</span>
+                }
+            </div>
+            <div class="table-panel">
+                <table class="data-table">
+                    <thead><tr><th>SANA</th><th>MARKAZ</th><th>SUMMA</th><th>DAVR</th><th>USUL</th><th>IZOH</th></tr></thead>
+                    <tbody>
+                        @foreach (var payment in payments)
+                        {
+                            <tr>
+                                <td>@payment.PaidAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td>@if (payment.CenterExists) { <a href="/platforma/markazlar/@payment.CenterId">@payment.CenterName</a> } else { <span class="muted">@payment.CenterName (o‘chirilgan)</span> }</td>
+                                <td><strong>@PlatformHome.Money(payment.Amount)</strong></td>
+                                <td>@payment.Months oy<br /><span class="muted">@payment.PeriodEndUtc.ToLocalTime().ToString("dd.MM.yyyy") gacha</span></td>
+                                <td>@MethodName(payment.Method)</td>
+                                <td>@(payment.Note.Length > 0 ? payment.Note : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    private IReadOnlyList<PlatformPaymentRow>? payments;
+    private DateOnly from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly to = DateOnly.FromDateTime(DateTime.Today);
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            payments = await Platform.GetPaymentsAsync(from, to);
+            error = null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            error = exception.Message;
+        }
+    }
+
+    private Task SetRange(int monthOffset)
+    {
+        var month = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(monthOffset);
+        from = month;
+        to = monthOffset == 0 ? DateOnly.FromDateTime(DateTime.Today) : month.AddMonths(1).AddDays(-1);
+        return LoadAsync();
+    }
+
+    private Task ThisYear()
+    {
+        from = new DateOnly(DateTime.Today.Year, 1, 1);
+        to = DateOnly.FromDateTime(DateTime.Today);
+        return LoadAsync();
+    }
+
+    private static string MethodName(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Naqd",
+        PaymentMethod.Card => "Karta",
+        PaymentMethod.Terminal => "Terminal",
+        PaymentMethod.BankTransfer => "Bank o‘tkazmasi",
+        _ => method.ToString()
+    };
+}

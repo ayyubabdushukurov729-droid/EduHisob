@@ -1,0 +1,228 @@
+@page "/guruhlar/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using System.Globalization
+@inject StudentAccountService Accounts
+@inject CenterDataService CenterData
+
+<PageTitle>@(group?.Name ?? "Guruh") — EduHisob</PageTitle>
+
+<section class="workspace">
+    <a class="back-link" href="/guruhlar">← Kurslar va guruhlar</a>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    @if (group is not null)
+    {
+        <div class="profile-header">
+            <div class="profile-identity">
+                <span class="profile-avatar">▣</span>
+                <div>
+                    <h1>@group.Name</h1>
+                    <p>@group.CourseName · @group.BranchName · @DayLabels(group.DaysOfWeek), @group.StartTime (@group.LessonDurationMinutes daq.) · @(string.IsNullOrEmpty(group.RoomName) ? "xona belgilanmagan" : group.RoomName)</p>
+                </div>
+            </div>
+            <div class="profile-balance">
+                <small>Ustoz</small>
+                <strong style="font-size:17px">@(string.IsNullOrEmpty(group.TeacherName) ? "Belgilanmagan" : group.TeacherName)</strong>
+                @if (group.TeacherShareAmount is not null)
+                {
+                    <small>@(group.TeacherSharePercent > 0 ? $"Ulushi: {group.TeacherSharePercent:0.##}% tushumdan" : "Ulush belgilanmagan")</small>
+                }
+            </div>
+        </div>
+
+        <div class="metric-grid finance-metrics">
+            <div class="metric-card"><span class="metric-icon violet">♙</span><span class="metric-label">O‘quvchilar</span><strong>@group.Members.Count(m => m.LeftOn is null) / @group.Capacity</strong><span class="metric-caption">Faol / sig‘im</span></div>
+            <div class="metric-card"><span class="metric-icon mint">◇</span><span class="metric-label">Oylik narx</span><strong>@Money(group.MonthlyFee)</strong><span class="metric-caption">@group.LessonsPerMonth ta dars</span></div>
+            @if (group.MonthIncome is { } income)
+            {
+                <div class="metric-card"><span class="metric-icon blue">↓</span><span class="metric-label">@MonthLabel(group.Month) tushumi</span><strong>@Money(income)</strong>@if (group.TeacherShareAmount is { } shareAmount) { <span class="metric-caption">Ustoz ulushi: @Money(shareAmount)</span> }</div>
+            }
+        </div>
+
+        <section class="panel section-gap">
+            <div class="panel-heading">
+                <div><p class="eyebrow">TARKIB VA DAVOMAT</p><h2>@MonthLabel(group.Month)</h2></div>
+                <div class="month-picker"><input type="month" class="form-control" value="@month.ToString("yyyy-MM")" @onchange="ChangeMonth" aria-label="Oy" /></div>
+            </div>
+            @if (group.Members.Count == 0)
+            {
+                <p class="muted">Guruhda o‘quvchi yo‘q. O‘quvchini uning profilidan yoki “Kurslar va guruhlar” sahifasidan qo‘shing.</p>
+            }
+            else
+            {
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>O‘QUVCHI</th>
+                                @if (group.MonthIncome is not null) { <th>NARX</th><th>BALANS</th> }
+                                @foreach (var date in group.LessonDates) { <th>@date.Day</th> }
+                                <th>KELDI</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var member in group.Members)
+                            {
+                                var marks = member.Attendance.Values.Where(v => v is not null).ToList();
+                                var attended = marks.Count(v => v is AttendanceStatus.Present or AttendanceStatus.Late);
+                                <tr>
+                                    <td>
+                                        @if (group.MonthIncome is not null) { <a class="text-link-strong" href="/oquvchilar/@member.StudentId">@member.FullName</a> } else { <strong>@member.FullName</strong> }
+                                        <br /><span class="muted">@member.Phone@(member.LeftOn is { } left ? $" · chiqqan {left:dd.MM}" : "")</span>
+                                    </td>
+                                    @if (group.MonthIncome is not null)
+                                    {
+                                        <td>@Money(member.FeeAfterDiscount)@if (member.DiscountPercent > 0) { <br /><span class="chip chip-info">−@member.DiscountPercent.ToString("0.##")%</span> }</td>
+                                        <td class="@MoneyClass(member.Balance ?? 0)">@Money(member.Balance ?? 0)</td>
+                                    }
+                                    @foreach (var date in group.LessonDates)
+                                    {
+                                        var status = member.Attendance.GetValueOrDefault(date);
+                                        <td><span class="attendance-dot @DotClass(status)">@DotText(status)</span></td>
+                                    }
+                                    <td>@(marks.Count == 0 ? "—" : $"{attended}/{marks.Count}")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (group.LessonDates.Count == 0)
+                {
+                    <p class="muted section-gap">Bu oy uchun davomat hali belgilanmagan. <a class="text-link-strong" href="/davomat">Davomat belgilash →</a></p>
+                }
+            }
+        </section>
+
+        <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+            <section class="panel section-gap">
+                <div class="panel-heading"><div><p class="eyebrow">TAHRIRLASH</p><h2>Guruh sozlamalari</h2></div></div>
+                <div class="form-columns">
+                    <div><label class="field-label">Guruh nomi</label><InputText @bind-Value="editName" class="form-control" /></div>
+                    <div>
+                        <label class="field-label">Ustoz</label>
+                        <InputSelect @bind-Value="editTeacherId" class="form-select">
+                            <option value="">Belgilanmagan</option>
+                            @foreach (var teacher in teachers) { <option value="@teacher.Id">@teacher.FullName</option> }
+                        </InputSelect>
+                    </div>
+                </div>
+                <div class="form-columns">
+                    <div><label class="field-label">Oylik narx (so‘m)</label><InputNumber @bind-Value="editFee" class="form-control" /></div>
+                </div>
+                <label class="field-label">Sig‘im</label>
+                <InputNumber @bind-Value="editCapacity" class="form-control" />
+                <p class="muted section-gap">Narx o‘zgarsa, yangi narx keyingi oydan qo‘llanadi. Ustoz ulushi Moliya → Ustozlar ulushi bo‘limida belgilanadi; ustoz almashsa, yangi ustozning foizi olinadi.</p>
+                <button class="btn btn-primary form-submit" @onclick="SaveGroup">Saqlash</button>
+            </section>
+        </AuthorizeView>
+    }
+    else if (string.IsNullOrEmpty(message))
+    {
+        <div class="notice">Yuklanmoqda...</div>
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly CultureInfo Uz = CultureInfo.GetCultureInfo("uz-Latn-UZ");
+    private GroupProfile? group;
+    private IReadOnlyList<TeacherOption> teachers = [];
+    private DateOnly month = ChargeLedger.CurrentMonth();
+    private string? message;
+    private bool isError;
+
+    private string editName = "";
+    private int? editTeacherId;
+    private decimal editFee;
+    private int editCapacity;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Load();
+        try
+        {
+            if (group is not null)
+            {
+                teachers = await CenterData.GetTeacherOptionsAsync();
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Ustoz va boshqa rollar uchun tahrirlash bo'limi ko'rinmaydi.
+        }
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            group = await Accounts.GetGroupProfileAsync(Id, month);
+            editName = group.Name;
+            editTeacherId = group.TeacherId;
+            editFee = group.MonthlyFee;
+            editCapacity = group.Capacity;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            message = exception.Message;
+            isError = true;
+        }
+    }
+
+    private async Task ChangeMonth(ChangeEventArgs args)
+    {
+        if (DateOnly.TryParseExact($"{args.Value}-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            month = parsed;
+            await Load();
+        }
+    }
+
+    private async Task SaveGroup()
+    {
+        try
+        {
+            await Accounts.UpdateGroupAsync(Id, editName, editTeacherId, editFee, editCapacity);
+            message = "Guruh saqlandi.";
+            isError = false;
+            await Load();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            message = exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Bu filialda shu nomli guruh bor yoki saqlab bo‘lmadi." : exception.Message;
+            isError = true;
+        }
+    }
+
+    private static string Money(decimal amount) => $"{amount.ToString("N0", Uz)} so‘m";
+    private static string MoneyClass(decimal amount) => amount < 0 ? "money-negative" : amount > 0 ? "money-positive" : "money-zero";
+    private static string MonthLabel(DateOnly value) => value.ToString("MMMM yyyy", Uz);
+
+    private static string DayLabels(string days)
+    {
+        string[] labels = ["Ya", "Du", "Se", "Ch", "Pa", "Ju", "Sh"];
+        return string.Join(", ", days.Split(',').Where(d => int.TryParse(d, out var n) && n is >= 0 and <= 6).Select(d => labels[int.Parse(d)]));
+    }
+
+    private static string DotClass(AttendanceStatus? status) => status switch
+    {
+        AttendanceStatus.Present => "dot-present",
+        AttendanceStatus.Late => "dot-late",
+        AttendanceStatus.Absent => "dot-absent",
+        AttendanceStatus.Excused => "dot-excused",
+        _ => "dot-empty"
+    };
+
+    private static string DotText(AttendanceStatus? status) => status switch
+    {
+        AttendanceStatus.Present => "✓",
+        AttendanceStatus.Late => "K",
+        AttendanceStatus.Absent => "✗",
+        AttendanceStatus.Excused => "S",
+        _ => "·"
+    };
+}

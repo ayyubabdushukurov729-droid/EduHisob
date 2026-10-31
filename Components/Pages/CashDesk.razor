@@ -1,0 +1,219 @@
+@page "/kassa"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Cash)]
+@using System.Globalization
+@inject CashDeskService CashService
+
+<PageTitle>Kassa — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">MOLIYA</p><h1>Kassa — mendagi pul</h1><p class="muted">Qo‘lingizdagi naqd pul va xodimlar o‘rtasida pul topshirish. Topshiriq qabul qiluvchi tasdiqlagandan keyin kuchga kiradi.</p></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    @if (overview is null)
+    {
+        <div class="notice">Yuklanmoqda...</div>
+    }
+    else
+    {
+        var me = overview.Me;
+        var incoming = overview.Transfers.Where(t => t.ToUserId == me.UserId && t.Status == CashTransferStatus.Pending).ToList();
+
+        <div class="metric-grid finance-metrics">
+            <div class="metric-card"><span class="metric-icon mint">◈</span><span class="metric-label">Mendagi naqd pul</span><strong class="@(me.Balance < 0 ? "money-negative" : "")">@Money(me.Balance)</strong><span class="metric-caption">Topshirishga mavjud: @Money(me.Available)</span></div>
+            <div class="metric-card"><span class="metric-icon blue">↓</span><span class="metric-label">Men qabul qilgan naqd</span><strong>@Money(me.Received)</strong><span class="metric-caption">+ boshqalardan olingan: @Money(me.Incoming)</span></div>
+            <div class="metric-card"><span class="metric-icon violet">↑</span><span class="metric-label">Men bergan naqd</span><strong>@Money(me.Spent)</strong><span class="metric-caption">+ topshirilgan: @Money(me.Outgoing)</span></div>
+        </div>
+
+        @if (incoming.Count > 0)
+        {
+            <section class="panel section-gap">
+                <div class="panel-heading"><div><p class="eyebrow">TASDIQ KUTILMOQDA</p><h2>Sizga topshirilgan pul</h2></div></div>
+                @foreach (var transfer in incoming)
+                {
+                    <div class="branch-item">
+                        <span class="branch-icon">↓</span>
+                        <span><strong>@transfer.FromName → sizga: @Money(transfer.Amount)</strong><small>@transfer.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") @(string.IsNullOrEmpty(transfer.Note) ? "" : $"· {transfer.Note}")</small></span>
+                        <div class="inline-actions">
+                            <button class="btn btn-primary btn-small" @onclick="() => Respond(transfer.Id, true)">Pulni oldim</button>
+                            <button class="btn btn-danger btn-small" @onclick="() => Respond(transfer.Id, false)">Rad etish</button>
+                        </div>
+                    </div>
+                }
+            </section>
+        }
+
+        <div class="workspace-grid branch-grid section-gap">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">TARIX</p><h2>Topshiriqlar</h2></div></div>
+                @if (overview.Transfers.Count == 0)
+                {
+                    <p class="muted">Hali pul topshirilmagan.</p>
+                }
+                else
+                {
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>SANA</th><th>KIMDAN → KIMGA</th><th>SUMMA</th><th>HOLAT</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var transfer in overview.Transfers)
+                                {
+                                    <tr>
+                                        <td>@transfer.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        <td>@transfer.FromName → @transfer.ToName@if (!string.IsNullOrEmpty(transfer.Note)) { <br /><span class="muted">@transfer.Note</span> }</td>
+                                        <td><strong>@Money(transfer.Amount)</strong></td>
+                                        <td><span class="status-badge @StatusClass(transfer.Status)">@StatusLabel(transfer.Status)</span></td>
+                                        <td>@if (transfer.FromUserId == me.UserId && transfer.Status == CashTransferStatus.Pending) { <button class="btn-link" @onclick="() => Cancel(transfer.Id)">Bekor qilish</button> }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">PUL TOPSHIRISH</p><h2>Hamkasbga topshirish</h2></div></div>
+                @if (overview.Recipients.Count == 0)
+                {
+                    <p class="muted">Kassaga ruxsati bor boshqa xodim yo‘q. Avval “Foydalanuvchilar” sahifasida kassir yoki buxgalter akkauntini oching.</p>
+                }
+                else
+                {
+                    <label class="field-label">Kimga</label>
+                    <select class="form-select" @bind="toUserId">
+                        <option value="">Tanlang</option>
+                        @foreach (var person in overview.Recipients) { <option value="@person.UserId">@person.Name — @CenterRoles.Label(person.Role)</option> }
+                    </select>
+                    <label class="field-label">Summa (so‘m)</label>
+                    <input type="number" class="form-control" @bind="amount" />
+                    <label class="field-label">Izoh</label>
+                    <input class="form-control" @bind="note" placeholder="Masalan: kunlik tushum" />
+                    <button class="btn btn-primary form-submit" @onclick="Send">Topshirish</button>
+                }
+            </section>
+        </div>
+
+        @if (overview.CanSeeAll)
+        {
+            <div class="workspace-grid section-gap">
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">XODIMLAR</p><h2>Kimda qancha naqd pul bor</h2></div></div>
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>XODIM</th><th>QABUL QILGAN</th><th>BERGAN</th><th>OLGAN / TOPSHIRGAN</th><th>QO‘LIDA</th></tr></thead>
+                            <tbody>
+                                @foreach (var holder in overview.Holders)
+                                {
+                                    <tr><td><strong>@holder.Name</strong><br /><span class="muted">@CenterRoles.Label(holder.Role)</span></td><td>@Money(holder.Received)</td><td>@Money(holder.Spent)</td><td>+@Money(holder.Incoming) / −@Money(holder.Outgoing)</td><td class="@(holder.Balance < 0 ? "money-negative" : "money-positive")">@Money(holder.Balance)</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="table-count">Bu hisobga kim qabul qilgani yozilgan naqd yozuvlar kiradi (yangi tizimdan keyingi yozuvlar).</p>
+                </section>
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">FILIALLAR</p><h2>Filial kassasi (naqd)</h2></div></div>
+                    @if (overview.Branches.Count == 0)
+                    {
+                        <p class="muted">Naqd yozuvlar yo‘q.</p>
+                    }
+                    @foreach (var branch in overview.Branches)
+                    {
+                        <div class="branch-item">
+                            <span class="branch-icon">⌂</span>
+                            <span><strong>@branch.BranchName</strong><small>Tushum @Money(branch.CashIncome) · xarajat @Money(branch.CashExpense)</small></span>
+                            <strong class="@(branch.Balance < 0 ? "money-negative" : "money-positive")">@Money(branch.Balance)</strong>
+                        </div>
+                        @if (branch.Balance < 0)
+                        {
+                            <div class="notice notice-error">Kassa minusda: naqd xarajat naqd tushumdan ko‘p. Kiritilmagan tushum yoki noto‘g‘ri to‘lov usuli bor-yo‘qligini tekshiring.</div>
+                        }
+                    }
+                </section>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    private static readonly CultureInfo Uz = CultureInfo.GetCultureInfo("uz-Latn-UZ");
+    private CashDeskOverview? overview;
+    private string toUserId = "";
+    private decimal amount;
+    private string note = "";
+    private string? message;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            overview = await CashService.GetOverviewAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Run(Func<Task> action, string success)
+    {
+        try
+        {
+            await action();
+            SetMessage(success, false);
+            await Load();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Send()
+    {
+        if (string.IsNullOrEmpty(toUserId))
+        {
+            SetMessage("Kimga topshirishni tanlang.", true);
+            return;
+        }
+
+        await Run(() => CashService.SendAsync(toUserId, amount, note), "Topshiriq yuborildi. Qabul qiluvchi tasdiqlashini kuting.");
+        if (!isError)
+        {
+            amount = 0;
+            note = "";
+        }
+    }
+
+    private Task Respond(int id, bool accept) => Run(() => CashService.RespondAsync(id, accept), accept ? "Pul qabul qilindi." : "Topshiriq rad etildi.");
+    private Task Cancel(int id) => Run(() => CashService.CancelAsync(id), "Topshiriq bekor qilindi.");
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string Money(decimal value) => $"{value.ToString("N0", Uz)} so‘m";
+
+    private static string StatusLabel(CashTransferStatus status) => status switch
+    {
+        CashTransferStatus.Pending => "Kutilmoqda",
+        CashTransferStatus.Accepted => "Qabul qilindi",
+        _ => "Rad etildi"
+    };
+
+    private static string StatusClass(CashTransferStatus status) => status switch
+    {
+        CashTransferStatus.Pending => "status-trial",
+        CashTransferStatus.Accepted => "status-active",
+        _ => "status-danger"
+    };
+}

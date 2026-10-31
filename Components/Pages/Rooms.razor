@@ -1,0 +1,128 @@
+@page "/xonalar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Management)]
+@using System.ComponentModel.DataAnnotations
+@inject CenterDataService CenterData
+
+<PageTitle>Xonalar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">TA’LIM JARAYONI</p><h1>Xonalar</h1><p class="muted">Filiallar bo‘yicha xonalar va sig‘imni boshqaring.</p></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    <div class="workspace-grid branch-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">MAVJUD XONALAR</p><h2>@rooms.Count ta xona</h2></div></div>
+            @if (rooms.Count == 0)
+            {
+                <p class="muted">Hozircha xona qo‘shilmagan.</p>
+            }
+            else
+            {
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead><tr><th>XONA</th><th>FILIAL</th><th>O‘RINLAR</th><th>FAOL GURUHLAR</th></tr></thead>
+                        <tbody>
+                            @foreach (var room in rooms)
+                            {
+                                <tr>
+                                    <td><strong>@room.Name</strong></td>
+                                    <td>@room.BranchName</td>
+                                    <td>@room.Capacity</td>
+                                    <td>@room.ActiveGroupCount</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">YANGI XONA</p><h2>Xona qo‘shish</h2></div></div>
+            @if (branches.Count == 0)
+            {
+                <p class="muted">Avval faol filial qo‘shing.</p>
+                <a class="btn btn-secondary" href="/filiallar">Filiallarni ochish</a>
+            }
+            else
+            {
+                <EditForm Model="input" OnValidSubmit="SaveRoom" FormName="new-room">
+                    <DataAnnotationsValidator />
+                    <label class="field-label" for="room-branch">Filial</label>
+                    <InputSelect @bind-Value="input.BranchId" id="room-branch" class="form-select">
+                        @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+                    </InputSelect>
+                    <label class="field-label" for="room-name">Xona nomi</label>
+                    <InputText @bind-Value="input.Name" id="room-name" class="form-control" placeholder="Masalan, 1-xona" />
+                    <ValidationMessage For="() => input.Name" />
+                    <label class="field-label" for="room-capacity">Sig‘imi (o‘rin)</label>
+                    <InputNumber @bind-Value="input.Capacity" id="room-capacity" class="form-control" />
+                    <ValidationMessage For="() => input.Capacity" />
+                    <button class="btn btn-primary form-submit" type="submit">Xonani saqlash</button>
+                </EditForm>
+            }
+        </section>
+    </div>
+</section>
+
+@code {
+    private IReadOnlyList<Branch> branches = [];
+    private IReadOnlyList<BranchRoomSummary> rooms = [];
+    private readonly RoomInput input = new();
+    private string? message;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+            rooms = await CenterData.GetBranchRoomsAsync();
+            if (branches.Count > 0) input.BranchId = branches[0].Id;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task SaveRoom()
+    {
+        try
+        {
+            await CenterData.AddBranchRoomAsync(input.BranchId, input.Name, input.Capacity);
+            input.Name = "";
+            rooms = await CenterData.GetBranchRoomsAsync();
+            SetMessage("Xona saqlandi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException
+                ? "Bu filialda bunday nomdagi xona mavjud yoki ma’lumotni saqlab bo‘lmadi."
+                : exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private sealed class RoomInput
+    {
+        [Range(1, int.MaxValue, ErrorMessage = "Filialni tanlang.")]
+        public int BranchId { get; set; }
+
+        [Required(ErrorMessage = "Xona nomini kiriting.")]
+        [StringLength(120, MinimumLength = 2, ErrorMessage = "Xona nomi 2–120 belgidan iborat bo‘lishi kerak.")]
+        public string Name { get; set; } = "";
+
+        [Range(1, 1000, ErrorMessage = "Xona sig‘imi 1–1000 oralig‘ida bo‘lishi kerak.")]
+        public int Capacity { get; set; } = 20;
+    }
+}

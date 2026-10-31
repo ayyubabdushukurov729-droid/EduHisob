@@ -1,0 +1,123 @@
+@page "/davomat"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Teaching)]
+@inject CenterDataService CenterData
+
+<PageTitle>Davomat — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading"><div><p class="eyebrow">TA’LIM JARAYONI</p><h1>Davomat</h1><p class="muted">Guruh va dars sanasi bo‘yicha davomatni belgilang.</p></div></div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    @if (groups.Count == 0)
+    {
+        <div class="empty-state"><span class="empty-icon">◷</span><h2>Faol guruh topilmadi</h2><p>Davomat kiritishdan oldin guruh yarating va o‘quvchilarni biriktiring.</p><a class="btn btn-primary" href="/guruhlar">Kurs va guruhlarga o‘tish</a></div>
+    }
+    else
+    {
+        <section class="panel attendance-panel">
+            <div class="filter-bar attendance-filters">
+                <div><label class="field-label" for="attendance-group">Guruh</label>
+                    <InputSelect @bind-Value="selectedGroupId" @bind-Value:after="LoadAttendance" id="attendance-group" class="form-select">
+                        @foreach (var group in groups) { <option value="@group.Id">@group.Name — @group.BranchName</option> }
+                    </InputSelect>
+                </div>
+                <div><label class="field-label" for="attendance-date">Dars sanasi</label>
+                    <InputDate @bind-Value="selectedDate" @bind-Value:after="LoadAttendance" id="attendance-date" class="form-control" />
+                </div>
+            </div>
+            @if (entries.Count == 0)
+            {
+                <div class="empty-state"><h2>Guruhda o‘quvchi yo‘q</h2><p>Avval o‘quvchilarni guruhga biriktiring.</p><a href="/guruhlar" class="btn btn-secondary">Guruhlarni boshqarish</a></div>
+            }
+            else
+            {
+                <EditForm Model="this" OnValidSubmit="SaveAttendance" FormName="attendance">
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>O‘QUVCHI</th><th>DAVOMAT HOLATI</th></tr></thead>
+                            <tbody>
+                                @foreach (var entry in entries)
+                                {
+                                    <tr @key="entry.StudentId">
+                                        <td><strong>@entry.StudentName</strong></td>
+                                        <td>
+                                            <InputSelect @bind-Value="entry.Status" class="form-select attendance-status" aria-label="@($"{entry.StudentName} davomat holati")">
+                                                <option value="">Tanlang</option>
+                                                <option value="@AttendanceStatus.Present">Keldi</option>
+                                                <option value="@AttendanceStatus.Absent">Kelmadi</option>
+                                                <option value="@AttendanceStatus.Late">Kechikdi</option>
+                                                <option value="@AttendanceStatus.Excused">Uzrli</option>
+                                            </InputSelect>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <button class="btn btn-primary form-submit" type="submit">Davomatni saqlash</button>
+                </EditForm>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<StudyGroupSummary> groups = [];
+    private List<AttendanceEntry> entries = [];
+    private int selectedGroupId;
+    private DateOnly selectedDate = DateOnly.FromDateTime(DateTime.Today);
+    private string? message;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            groups = await CenterData.GetStudyGroupsAsync();
+            if (groups.Count > 0)
+            {
+                selectedGroupId = groups[0].Id;
+                await LoadAttendance();
+            }
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task LoadAttendance()
+    {
+        try
+        {
+            entries = (await CenterData.GetAttendanceAsync(selectedGroupId, selectedDate)).ToList();
+            SetMessage("", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task SaveAttendance()
+    {
+        try
+        {
+            await CenterData.SaveAttendanceAsync(selectedGroupId, selectedDate, entries);
+            SetMessage("Davomat saqlandi.", false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Davomatni saqlab bo‘lmadi. Qayta urinib ko‘ring." : exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = string.IsNullOrEmpty(text) ? null : text;
+        isError = error;
+    }
+}

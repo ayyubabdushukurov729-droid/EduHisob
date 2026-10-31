@@ -1,0 +1,624 @@
+@page "/oquvchilar/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.StudentDesk)]
+@using System.Globalization
+@inject StudentAccountService Accounts
+@inject CenterDataService CenterData
+
+<PageTitle>@(profile?.Student.FullName ?? "O‘quvchi") — EduHisob</PageTitle>
+
+<section class="workspace">
+    <a class="back-link" href="/oquvchilar">← O‘quvchilar ro‘yxati</a>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message
+            @if (lastPaymentId is { } receiptId) { <text> · </text><a class="text-link-strong" href="/chek/@receiptId" target="_blank">Chekni ochish</a> }
+        </div>
+    }
+    @if (profile is null)
+    {
+        @if (string.IsNullOrEmpty(message)) { <div class="notice">Yuklanmoqda...</div> }
+    }
+    else
+    {
+        var s = profile.Student;
+        <div class="profile-header">
+            <div class="profile-identity">
+                <span class="profile-avatar">@s.FullName.FirstOrDefault()</span>
+                <div>
+                    <h1>@s.FullName</h1>
+                    <p>@s.Phone@(string.IsNullOrEmpty(s.ParentPhone) ? "" : $" · ota-ona: {s.ParentPhone}") · @profile.BranchName · <span class="status-badge @StatusClass(s.Status)">@StatusLabel(s.Status)</span>
+                        @if (profile.DebtStage is { } stage && stage != DebtStage.Paid)
+                        {
+                            <text> </text><span class="chip chip-danger">@StudentAccountService.DebtStageLabel(stage)@(profile.DebtOccurrence > 1 ? $" · {profile.DebtOccurrence}-marta" : "")</span>
+                        }
+                    </p>
+                </div>
+            </div>
+            <div class="profile-balance">
+                <small>Balans</small>
+                <strong class="@MoneyClass(profile.Balance)">@Money(profile.Balance)</strong>
+                <small>To‘langan @Money(profile.TotalPaid) · hisoblangan @Money(profile.TotalCharged)</small>
+            </div>
+        </div>
+
+        <div class="profile-tabs" role="tablist">
+            @foreach (var (key, label) in tabs)
+            {
+                <button type="button" role="tab" class="@(tab == key ? "active" : "")" @onclick="() => tab = key">@label</button>
+            }
+        </div>
+
+        @switch (tab)
+        {
+            case "info":
+                <div class="workspace-grid branch-grid">
+                    <section class="panel">
+                        <div class="panel-heading"><div><p class="eyebrow">MA’LUMOTLAR</p><h2>Shaxsiy ma’lumot</h2></div></div>
+                        <EditForm Model="editInput" OnValidSubmit="SaveInfo" FormName="student-edit">
+                            <label class="field-label" for="st-name">Ism familiya</label>
+                            <InputText id="st-name" @bind-Value="editInput.FullName" class="form-control" />
+                            <div class="form-columns">
+                                <div><label class="field-label" for="st-phone">Telefon</label><InputText id="st-phone" @bind-Value="editInput.Phone" class="form-control" /></div>
+                                <div><label class="field-label" for="st-parent">Ota-ona telefoni</label><InputText id="st-parent" @bind-Value="editInput.ParentPhone" class="form-control" /></div>
+                            </div>
+                            <label class="field-label" for="st-birth">Tug‘ilgan sana</label>
+                            <InputDate id="st-birth" @bind-Value="editInput.BirthDate" class="form-control" />
+                            <label class="field-label" for="st-notes">Qo‘shimcha ma’lumot</label>
+                            <InputTextArea id="st-notes" @bind-Value="editInput.Notes" class="form-control" rows="3" />
+                            <button class="btn btn-primary form-submit" type="submit">Saqlash</button>
+                        </EditForm>
+                    </section>
+                    <section class="panel">
+                        <div class="panel-heading"><div><p class="eyebrow">HOLAT</p><h2>O‘quvchi holati</h2></div></div>
+                        <dl class="detail-list">
+                            <dt>Qo‘shilgan sana</dt><dd>@s.JoinedOn.ToString("dd.MM.yyyy")</dd>
+                            <dt>Faol guruhlar</dt><dd>@profile.Groups.Count(g => g.LeftOn is null)</dd>
+                            <dt>Oxirgi to‘lov</dt><dd>@(profile.Payments.FirstOrDefault()?.Date.ToString("dd.MM.yyyy") ?? "—")</dd>
+                        </dl>
+                        <div class="inline-actions section-gap">
+                            @if (s.Status == StudentStatus.Trial)
+                            {
+                                <button class="btn btn-primary btn-small" @onclick="() => SetStatus(StudentStatus.Active)">Faol o‘quvchi qilish</button>
+                            }
+                            @if (s.Status == StudentStatus.Left)
+                            {
+                                <span class="muted">O‘quvchini qaytarish uchun “Guruhlar” bo‘limida guruhga qo‘shing.</span>
+                            }
+                            <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                                @if (s.Status is StudentStatus.Left or StudentStatus.Trial)
+                                {
+                                    <button class="btn btn-danger btn-small" @onclick="() => SetStatus(StudentStatus.Archived)">Arxivga o‘tkazish</button>
+                                }
+                            </AuthorizeView>
+                        </div>
+                        @if (s.Status == StudentStatus.Trial)
+                        {
+                            <p class="muted section-gap">Sinov holatida oylik to‘lov hisoblanmaydi. Faol qilingan kundan boshlab hisoblanadi.</p>
+                        }
+                    </section>
+                </div>
+                break;
+
+            case "groups":
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">GURUHLAR</p><h2>Guruhlar va chegirmalar</h2></div></div>
+                    @if (profile.Groups.Count == 0)
+                    {
+                        <p class="muted">O‘quvchi hali hech qaysi guruhga qo‘shilmagan.</p>
+                    }
+                    else
+                    {
+                        <div class="table-panel">
+                            <table class="data-table">
+                                <thead><tr><th>GURUH</th><th>USTOZ / JADVAL</th><th>NARX</th><th>CHEGIRMA</th><th>BU OY DAVOMAT</th><th>HOLAT</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var g in profile.Groups)
+                                    {
+                                        <tr>
+                                            <td><a class="text-link-strong" href="/guruhlar/@g.GroupId">@g.GroupName</a><br /><span class="muted">@g.CourseName</span></td>
+                                            <td>@(string.IsNullOrEmpty(g.TeacherName) ? "—" : g.TeacherName)<br /><span class="muted">@DayLabels(g.DaysOfWeek), @g.StartTime</span></td>
+                                            <td>@Money(g.FeeAfterDiscount)@if (g.DiscountPercent > 0) { <br /><span class="muted"><s>@Money(g.MonthlyFee)</s></span> }</td>
+                                            <td>@(g.DiscountPercent > 0 ? $"{g.DiscountPercent:0.##}%" : "—")@if (!string.IsNullOrEmpty(g.DiscountNote)) { <br /><span class="muted">@g.DiscountNote</span> }</td>
+                                            <td>
+                                                <div class="attendance-dots">
+                                                    @if (g.MonthAttendance.Count == 0) { <span class="muted">—</span> }
+                                                    @foreach (var mark in g.MonthAttendance)
+                                                    {
+                                                        <span class="attendance-dot @DotClass(mark.Status)" title="@mark.Date.ToString("dd.MM") — @AttendanceLabel(mark.Status)">@mark.Date.Day</span>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td>
+                                                @if (g.LeftOn is { } left)
+                                                {
+                                                    <span class="status-badge status-muted">Chiqqan @left.ToString("dd.MM.yyyy")</span><br /><span class="muted">@g.LeaveReason</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="status-badge status-active">Faol</span><br /><span class="muted">@g.EnrolledOn.ToString("dd.MM.yyyy") dan</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (g.LeftOn is null)
+                                                {
+                                                    <div class="inline-actions">
+                                                        <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                                                            <button class="btn-link" @onclick="() => StartDiscount(g)">Chegirma</button>
+                                                        </AuthorizeView>
+                                                        <button class="btn-link" @onclick="() => StartLeave(g)">Guruhdan chiqarish</button>
+                                                    </div>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    @if (discountGroup is not null)
+                    {
+                        <div class="panel section-gap">
+                            <h3>“@discountGroup.GroupName” uchun chegirma</h3>
+                            <p class="muted">Joriy va keyingi oylar hisobiga qo‘llanadi. O‘tgan oylar o‘zgarmaydi.</p>
+                            <div class="inline-form">
+                                <div><label class="field-label">Chegirma, %</label><InputNumber @bind-Value="discountPercent" class="form-control" /></div>
+                                <div><label class="field-label">Sabab</label><InputText @bind-Value="discountNote" class="form-control" placeholder="aka-uka, a’lochi, xodim farzandi..." /></div>
+                                <button class="btn btn-primary btn-small" @onclick="SaveDiscount">Saqlash</button>
+                                <button class="btn btn-secondary btn-small" @onclick="() => discountGroup = null">Bekor qilish</button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (leaveGroup is not null)
+                    {
+                        <div class="panel section-gap">
+                            <h3>“@leaveGroup.GroupName” guruhidan chiqarish</h3>
+                            <p class="muted">Davomat va to‘lov tarixi saqlanib qoladi. Chiqqan oydan keyingi oylar uchun to‘lov hisoblanmaydi.</p>
+                            <div class="inline-form">
+                                <div><label class="field-label">Chiqish sanasi</label><InputDate @bind-Value="leaveDate" class="form-control" /></div>
+                                <div>
+                                    <label class="field-label">Sabab</label>
+                                    <InputSelect @bind-Value="leaveReasonId" class="form-select">
+                                        <option value="0">Sababni tanlang</option>
+                                        @foreach (var reason in leaveReasons) { <option value="@reason.Id">@reason.Name</option> }
+                                    </InputSelect>
+                                </div>
+                                <div><label class="field-label">Izoh (ixtiyoriy)</label><InputText @bind-Value="leaveNote" class="form-control" /></div>
+                                <button class="btn btn-danger btn-small" @onclick="SaveLeave">Chiqarish</button>
+                                <button class="btn btn-secondary btn-small" @onclick="() => leaveGroup = null">Bekor qilish</button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (s.Status != StudentStatus.Archived)
+                    {
+                        <div class="section-gap">
+                            <h3>Guruhga qo‘shish</h3>
+                            @if (availableGroups.Count == 0)
+                            {
+                                <p class="muted">Bu filialda qo‘shish mumkin bo‘lgan faol guruh yo‘q.</p>
+                            }
+                            else
+                            {
+                                <div class="inline-form">
+                                    <div>
+                                        <label class="field-label">Guruh</label>
+                                        <InputSelect @bind-Value="enrollGroupId" class="form-select">
+                                            <option value="0">Guruhni tanlang</option>
+                                            @foreach (var group in availableGroups) { <option value="@group.Id">@group.Name — @Money(group.MonthlyFee), @group.StudentCount/@group.Capacity</option> }
+                                        </InputSelect>
+                                    </div>
+                                    <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                                        <div><label class="field-label">Chegirma, %</label><InputNumber @bind-Value="enrollDiscount" class="form-control" /></div>
+                                        <div><label class="field-label">Chegirma sababi</label><InputText @bind-Value="enrollDiscountNote" class="form-control" /></div>
+                                    </AuthorizeView>
+                                    <button class="btn btn-primary btn-small" @onclick="Enroll">Qo‘shish</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </section>
+                break;
+
+            case "payments":
+                <div class="workspace-grid branch-grid">
+                    <section class="panel">
+                        <div class="panel-heading"><div><p class="eyebrow">TO‘LOVLAR</p><h2>To‘lovlar tarixi</h2></div></div>
+                        @if (profile.Payments.Count == 0)
+                        {
+                            <p class="muted">To‘lovlar hali yo‘q.</p>
+                        }
+                        else
+                        {
+                            <div class="table-panel">
+                                <table class="data-table">
+                                    <thead><tr><th>SANA</th><th>SUMMA</th><th>USUL</th><th>GURUH</th><th>QABUL QILDI</th><th></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var p in profile.Payments)
+                                        {
+                                            <tr>
+                                                <td>@p.Date.ToString("dd.MM.yyyy")</td>
+                                                <td><strong>@Money(p.Amount)</strong>@if (!string.IsNullOrEmpty(p.Note)) { <br /><span class="muted">@p.Note</span> }</td>
+                                                <td>@StudentAccountService.PaymentMethodLabel(p.Method)</td>
+                                                <td>@(p.GroupName ?? "—")</td>
+                                                <td>@(string.IsNullOrEmpty(p.RecordedBy) ? "—" : p.RecordedBy)</td>
+                                                <td><AuthorizeView Roles="@CenterRoles.Cash" Context="r"><a class="text-link-strong" href="/chek/@p.Id" target="_blank">Chek</a></AuthorizeView></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </section>
+                    <AuthorizeView Roles="@CenterRoles.Cash" Context="r">
+                        <Authorized>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">TO‘LOV QABUL QILISH</p><h2>Yangi to‘lov</h2></div></div>
+                                @if (profile.Balance < 0)
+                                {
+                                    <p class="muted">Qarzi: <strong class="money-negative">@Money(-profile.Balance)</strong></p>
+                                }
+                                <label class="field-label">Summa (so‘m)</label>
+                                <InputNumber @bind-Value="payAmount" class="form-control" />
+                                <div class="form-columns">
+                                    <div>
+                                        <label class="field-label">To‘lov usuli</label>
+                                        <InputSelect @bind-Value="payMethod" class="form-select">
+                                            @foreach (var method in Enum.GetValues<PaymentMethod>()) { <option value="@method">@StudentAccountService.PaymentMethodLabel(method)</option> }
+                                        </InputSelect>
+                                    </div>
+                                    <div><label class="field-label">Sana</label><InputDate @bind-Value="payDate" class="form-control" /></div>
+                                </div>
+                                <label class="field-label">Guruh (ustoz ulushi uchun)</label>
+                                <InputSelect @bind-Value="payGroupId" class="form-select">
+                                    <option value="">Guruhsiz</option>
+                                    @foreach (var g in profile.Groups.Where(g => g.LeftOn is null)) { <option value="@g.GroupId">@g.GroupName</option> }
+                                </InputSelect>
+                                <label class="field-label">Izoh (ixtiyoriy)</label>
+                                <InputText @bind-Value="payNote" class="form-control" />
+                                <button class="btn btn-primary form-submit" @onclick="TakePayment" disabled="@busy">To‘lovni qabul qilish</button>
+                            </section>
+                        </Authorized>
+                    </AuthorizeView>
+                </div>
+                break;
+
+            case "charges":
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">HISOBLAR</p><h2>Oylik hisoblangan to‘lovlar</h2></div></div>
+                    <p class="muted">Har oy boshida har bir faol guruh uchun avtomatik hisoblanadi (chegirma ayirilgan, muzlatilgan oylar o‘tkazib yuboriladi).</p>
+                    @if (profile.Charges.Count == 0)
+                    {
+                        <p class="muted">Hali hisoblangan oy yo‘q.</p>
+                    }
+                    else
+                    {
+                        <div class="table-panel">
+                            <table class="data-table">
+                                <thead><tr><th>OY</th><th>GURUH</th><th>NARX</th><th>CHEGIRMA</th><th>HISOBLANDI</th></tr></thead>
+                                <tbody>
+                                    @foreach (var c in profile.Charges)
+                                    {
+                                        <tr><td>@MonthLabel(c.Month)</td><td>@c.GroupName</td><td>@Money(c.FullAmount)</td><td>@(c.DiscountAmount > 0 ? Money(c.DiscountAmount) : "—")</td><td><strong>@Money(c.Amount)</strong></td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
+                break;
+
+            case "freeze":
+                <div class="workspace-grid branch-grid">
+                    <section class="panel">
+                        <div class="panel-heading"><div><p class="eyebrow">MUZLATISH</p><h2>Muzlatishlar tarixi</h2></div></div>
+                        @if (profile.Freezes.Count == 0)
+                        {
+                            <p class="muted">O‘quvchi hech qachon muzlatilmagan.</p>
+                        }
+                        else
+                        {
+                            <div class="table-panel">
+                                <table class="data-table">
+                                    <thead><tr><th>DAVR</th><th>SABAB</th><th></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var f in profile.Freezes)
+                                        {
+                                            <tr>
+                                                <td>@MonthLabel(f.FromMonth) — @MonthLabel(f.ToMonth)</td>
+                                                <td>@f.Reason</td>
+                                                <td>@if (f.ToMonth >= ChargeLedger.CurrentMonth()) { <button class="btn-link" @onclick="() => CancelFreeze(f.Id)">Bekor qilish</button> }</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </section>
+                    <section class="panel">
+                        <div class="panel-heading"><div><p class="eyebrow">YANGI MUZLATISH</p><h2>O‘quvchini muzlatish</h2></div></div>
+                        @if (s.Status is StudentStatus.Active or StudentStatus.Frozen)
+                        {
+                            <p class="muted">Tanlangan oylarda oylik to‘lov hisoblanmaydi. Davr tugagach o‘quvchi avtomatik faol bo‘ladi.</p>
+                            <div class="form-columns">
+                                <div><label class="field-label">Qaysi oydan</label><input type="month" class="form-control" value="@freezeFrom.ToString("yyyy-MM")" @onchange="e => freezeFrom = ParseMonth(e.Value, freezeFrom)" /></div>
+                                <div><label class="field-label">Qaysi oygacha</label><input type="month" class="form-control" value="@freezeTo.ToString("yyyy-MM")" @onchange="e => freezeTo = ParseMonth(e.Value, freezeTo)" /></div>
+                            </div>
+                            <label class="field-label">Sabab</label>
+                            <InputText @bind-Value="freezeReason" class="form-control" placeholder="Kasallik, safar, imtihon..." />
+                            <button class="btn btn-primary form-submit" @onclick="Freeze">Muzlatish</button>
+                        }
+                        else
+                        {
+                            <p class="muted">Faqat faol o‘quvchini muzlatish mumkin.</p>
+                        }
+                    </section>
+                </div>
+                break;
+
+            case "notes":
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">IZOHLAR</p><h2>Izohlar va eslatmalar</h2></div></div>
+                    <div class="inline-form">
+                        <div><InputTextArea @bind-Value="noteText" class="form-control" rows="2" placeholder="Masalan: ota-onasi bilan gaplashildi, keyingi oy to‘laydi" /></div>
+                        <button class="btn btn-primary btn-small" @onclick="AddNote">Qo‘shish</button>
+                    </div>
+                    <div class="note-list section-gap">
+                        @if (profile.Notes.Count == 0) { <p class="muted">Izohlar yo‘q.</p> }
+                        @foreach (var note in profile.Notes)
+                        {
+                            <div class="note-item">@note.Text<small>@note.Author · @note.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small></div>
+                        }
+                    </div>
+                </section>
+                break;
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly CultureInfo Uz = CultureInfo.GetCultureInfo("uz-Latn-UZ");
+    private readonly (string Key, string Label)[] tabs =
+    [
+        ("info", "Umumiy"), ("groups", "Guruhlar"), ("payments", "To‘lovlar"), ("charges", "Hisoblar"), ("freeze", "Muzlatish"), ("notes", "Izohlar")
+    ];
+
+    private StudentProfile? profile;
+    private IReadOnlyList<StudyGroupSummary> availableGroups = [];
+    private IReadOnlyList<LeaveReason> leaveReasons = [];
+    private string tab = "info";
+    private string? message;
+    private bool isError;
+    private bool busy;
+    private int? lastPaymentId;
+
+    private readonly EditInput editInput = new();
+
+    private StudentGroupMembership? discountGroup;
+    private decimal discountPercent;
+    private string discountNote = "";
+
+    private StudentGroupMembership? leaveGroup;
+    private DateOnly leaveDate = DateOnly.FromDateTime(DateTime.Today);
+    private int leaveReasonId;
+    private string leaveNote = "";
+
+    private int enrollGroupId;
+    private decimal enrollDiscount;
+    private string enrollDiscountNote = "";
+
+    private decimal payAmount;
+    private PaymentMethod payMethod = PaymentMethod.Cash;
+    private DateOnly payDate = DateOnly.FromDateTime(DateTime.Today);
+    private int? payGroupId;
+    private string payNote = "";
+
+    private DateOnly freezeFrom = ChargeLedger.CurrentMonth();
+    private DateOnly freezeTo = ChargeLedger.CurrentMonth();
+    private string freezeReason = "";
+
+    private string noteText = "";
+
+    protected override async Task OnParametersSetAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        try
+        {
+            profile = await Accounts.GetStudentProfileAsync(Id);
+            var s = profile.Student;
+            editInput.FullName = s.FullName;
+            editInput.Phone = s.Phone;
+            editInput.ParentPhone = s.ParentPhone;
+            editInput.BirthDate = s.BirthDate;
+            editInput.Notes = s.Notes;
+            var activeGroupIds = profile.Groups.Where(g => g.LeftOn is null).Select(g => g.GroupId).ToHashSet();
+            availableGroups = (await CenterData.GetStudyGroupsAsync())
+                .Where(g => g.BranchId == s.BranchId && !activeGroupIds.Contains(g.Id))
+                .ToList();
+            leaveReasons = await Accounts.GetLeaveReasonsAsync();
+            if (payAmount == 0 && profile.Balance < 0) payAmount = -profile.Balance;
+            if (payGroupId is null) payGroupId = profile.Groups.FirstOrDefault(g => g.LeftOn is null)?.GroupId;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task Run(Func<Task> action, string success)
+    {
+        if (busy) return;
+        busy = true;
+        lastPaymentId = null;
+        try
+        {
+            await action();
+            SetMessage(success, false);
+            await Reload();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Ma’lumotni saqlab bo‘lmadi. Qayta urinib ko‘ring." : exception.Message, true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private Task SaveInfo() => Run(() => Accounts.UpdateStudentAsync(Id, editInput.FullName, editInput.Phone, editInput.ParentPhone, editInput.BirthDate, editInput.Notes), "Ma’lumotlar saqlandi.");
+
+    private Task SetStatus(StudentStatus status) => Run(() => Accounts.SetStudentStatusAsync(Id, status), "Holat yangilandi.");
+
+    private void StartDiscount(StudentGroupMembership group)
+    {
+        leaveGroup = null;
+        discountGroup = group;
+        discountPercent = group.DiscountPercent;
+        discountNote = group.DiscountNote;
+    }
+
+    private async Task SaveDiscount()
+    {
+        var group = discountGroup!;
+        await Run(() => Accounts.SetDiscountAsync(Id, group.GroupId, discountPercent, discountNote), "Chegirma saqlandi.");
+        if (!isError) discountGroup = null;
+    }
+
+    private void StartLeave(StudentGroupMembership group)
+    {
+        discountGroup = null;
+        leaveGroup = group;
+        leaveDate = DateOnly.FromDateTime(DateTime.Today);
+        leaveReasonId = 0;
+        leaveNote = "";
+    }
+
+    private async Task SaveLeave()
+    {
+        if (leaveReasonId == 0)
+        {
+            SetMessage("Chiqish sababini tanlang.", true);
+            return;
+        }
+
+        var group = leaveGroup!;
+        await Run(() => Accounts.LeaveGroupAsync(Id, group.GroupId, leaveDate, leaveReasonId, leaveNote), "O‘quvchi guruhdan chiqarildi.");
+        if (!isError) leaveGroup = null;
+    }
+
+    private async Task Enroll()
+    {
+        if (enrollGroupId == 0)
+        {
+            SetMessage("Guruhni tanlang.", true);
+            return;
+        }
+
+        await Run(() => CenterData.EnrollStudentAsync(enrollGroupId, Id, enrollDiscount, enrollDiscountNote), "O‘quvchi guruhga qo‘shildi.");
+        if (!isError)
+        {
+            enrollGroupId = 0;
+            enrollDiscount = 0;
+            enrollDiscountNote = "";
+        }
+    }
+
+    private async Task TakePayment()
+    {
+        if (payAmount <= 0)
+        {
+            SetMessage("To‘lov summasini kiriting.", true);
+            return;
+        }
+
+        int createdId = 0;
+        await Run(async () =>
+        {
+            createdId = await CenterData.AddFinancialTransactionAsync(
+                FinancialTransactionType.Income, profile!.Student.BranchId, Id, payDate, "", payAmount, payMethod, payNote, payGroupId);
+        }, $"{Money(payAmount)} to‘lov qabul qilindi.");
+        if (!isError)
+        {
+            lastPaymentId = createdId;
+            payAmount = profile is { Balance: < 0 } ? -profile.Balance : 0;
+            payNote = "";
+        }
+    }
+
+    private Task Freeze() => Run(() => Accounts.FreezeAsync(Id, freezeFrom, freezeTo, freezeReason), "O‘quvchi muzlatildi.");
+
+    private Task CancelFreeze(int freezeId) => Run(() => Accounts.CancelFreezeAsync(Id, freezeId), "Muzlatish bekor qilindi.");
+
+    private async Task AddNote()
+    {
+        await Run(() => Accounts.AddNoteAsync(Id, noteText), "Izoh qo‘shildi.");
+        if (!isError) noteText = "";
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static DateOnly ParseMonth(object? value, DateOnly fallback) =>
+        DateOnly.TryParseExact($"{value}-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var month) ? month : fallback;
+
+    private static string Money(decimal amount) => $"{amount.ToString("N0", Uz)} so‘m";
+    private static string MoneyClass(decimal amount) => amount < 0 ? "money-negative" : amount > 0 ? "money-positive" : "money-zero";
+    private static string MonthLabel(DateOnly month) => month.ToString("MMMM yyyy", Uz);
+
+    private static string DayLabels(string days)
+    {
+        string[] labels = ["Ya", "Du", "Se", "Ch", "Pa", "Ju", "Sh"];
+        return string.Join(", ", days.Split(',').Where(d => int.TryParse(d, out var n) && n is >= 0 and <= 6).Select(d => labels[int.Parse(d)]));
+    }
+
+    private static string DotClass(AttendanceStatus status) => status switch
+    {
+        AttendanceStatus.Present => "dot-present",
+        AttendanceStatus.Late => "dot-late",
+        AttendanceStatus.Absent => "dot-absent",
+        _ => "dot-excused"
+    };
+
+    private static string AttendanceLabel(AttendanceStatus status) => status switch
+    {
+        AttendanceStatus.Present => "keldi",
+        AttendanceStatus.Late => "kechikdi",
+        AttendanceStatus.Absent => "kelmadi",
+        _ => "sababli"
+    };
+
+    private static string StatusLabel(StudentStatus status) => status switch
+    {
+        StudentStatus.Trial => "Sinov",
+        StudentStatus.Active => "Faol",
+        StudentStatus.Frozen => "Muzlatilgan",
+        StudentStatus.Left => "Ketgan",
+        _ => "Arxiv"
+    };
+
+    private static string StatusClass(StudentStatus status) => status switch
+    {
+        StudentStatus.Active => "status-active",
+        StudentStatus.Trial => "status-trial",
+        StudentStatus.Frozen => "status-frozen",
+        _ => "status-muted"
+    };
+
+    private sealed class EditInput
+    {
+        public string FullName { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string ParentPhone { get; set; } = "";
+        public DateOnly? BirthDate { get; set; }
+        public string Notes { get; set; } = "";
+    }
+}

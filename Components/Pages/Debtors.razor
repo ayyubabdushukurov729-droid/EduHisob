@@ -1,0 +1,191 @@
+@page "/qarzdorlar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Cash)]
+@using System.Globalization
+@inject StudentAccountService Accounts
+@inject CenterDataService CenterData
+
+<PageTitle>Qarzdorlar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">MOLIYA</p><h1>Qarzdorlar</h1><p class="muted">Balansi minusdagi o‘quvchilar bilan ishlash doskasi. Qarz o‘quvchi profilidagi balans bilan bir xil hisoblanadi.</p></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+
+    <div class="metric-grid finance-metrics">
+        <div class="metric-card"><span class="metric-icon violet">♙</span><span class="metric-label">Qarzdorlar</span><strong>@Open.Count()</strong><span class="metric-caption">Hali to‘lamaganlar</span></div>
+        <div class="metric-card"><span class="metric-icon blue">◇</span><span class="metric-label">Jami qarz</span><strong class="money-negative">@Money(Open.Sum(d => d.Debt))</strong><span class="metric-caption">Barcha qarzdorlar bo‘yicha</span></div>
+        <div class="metric-card"><span class="metric-icon mint">◷</span><span class="metric-label">Va’da qilingan</span><strong>@Money(Open.Where(d => d.Stage == DebtStage.Promised).Sum(d => d.Debt))</strong><span class="metric-caption">@Open.Count(d => d.Stage == DebtStage.Promised) ta o‘quvchi · @Open.Count(d => d.Stage == DebtStage.Promised && d.PromisedOn < Today) tasi muddatidan o‘tgan</span></div>
+    </div>
+
+    <div class="filter-bar section-gap">
+        <input class="form-control search-input" placeholder="Ism yoki telefon" @bind="search" @bind:event="oninput" aria-label="Qarzdorlarni qidirish" />
+        <select class="form-select branch-select" @onchange="ChangeBranch" aria-label="Filial">
+            <option value="">Barcha filiallar</option>
+            @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+        </select>
+    </div>
+
+    @if (debtors is null)
+    {
+        <div class="notice">Yuklanmoqda...</div>
+    }
+    else
+    {
+        <div class="kanban">
+            @foreach (var stage in Enum.GetValues<DebtStage>())
+            {
+                var cards = Filtered.Where(d => d.Stage == stage).ToList();
+                <section class="kanban-column">
+                    <header><h2>@StudentAccountService.DebtStageLabel(stage)</h2><small>@cards.Count · @Money(cards.Sum(c => c.Debt))</small></header>
+                    <div class="kanban-cards">
+                        @if (cards.Count == 0) { <div class="kanban-empty">Bo‘sh</div> }
+                        @foreach (var card in cards)
+                        {
+                            <article class="kanban-card" @key="card.StudentId">
+                                <header>
+                                    <a href="/oquvchilar/@card.StudentId">@card.StudentName</a>
+                                    @if (card.Stage != DebtStage.Paid) { <strong class="money-negative">@Money(card.Debt)</strong> }
+                                </header>
+                                <p>📞 <a href="tel:@card.Phone">@card.Phone</a>@if (!string.IsNullOrEmpty(card.ParentPhone)) { <text> · ota-ona: </text><a href="tel:@card.ParentPhone">@card.ParentPhone</a> }</p>
+                                <p>@(string.IsNullOrEmpty(card.GroupNames) ? "Faol guruh yo‘q" : card.GroupNames) · @card.BranchName</p>
+                                <p>Oxirgi to‘lov: @(card.LastPaymentOn?.ToString("dd.MM.yyyy") ?? "hech qachon")</p>
+                                @if (card.Occurrence > 1) { <span class="chip chip-warning">Qayta qarz · @card.Occurrence-marta</span> }
+                                @if (card.Stage == DebtStage.Promised && card.PromisedOn is { } promised)
+                                {
+                                    <span class="chip @(promised < Today ? "chip-danger" : "chip-info")">Va’da: @promised.ToString("dd.MM.yyyy")@(promised < Today ? " (o‘tdi)" : "")</span>
+                                }
+                                @if (!string.IsNullOrEmpty(card.Note)) { <p><em>@card.Note</em></p> }
+
+                                @if (card.Stage != DebtStage.Paid)
+                                {
+                                    @if (editing == card.StudentId)
+                                    {
+                                        <div class="kanban-card-actions">
+                                            <select class="form-select" @bind="editStage">
+                                                @foreach (var option in Enum.GetValues<DebtStage>().Where(s => s != DebtStage.Paid)) { <option value="@option">@StudentAccountService.DebtStageLabel(option)</option> }
+                                            </select>
+                                            @if (editStage == DebtStage.Promised) { <input type="date" class="form-control" @bind="editPromised" /> }
+                                            <input class="form-control" placeholder="Izoh: nima deyildi?" @bind="editNote" />
+                                            <div class="inline-actions">
+                                                <button class="btn btn-primary btn-small" @onclick="() => Save(card.StudentId)">Saqlash</button>
+                                                <button class="btn btn-secondary btn-small" @onclick="() => editing = null">Bekor</button>
+                                            </div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="inline-actions section-gap" style="margin-top:8px">
+                                            <button class="btn-link" @onclick="() => StartEdit(card)">Holatni o‘zgartirish</button>
+                                            <a class="btn-link" href="/oquvchilar/@card.StudentId">To‘lov qabul qilish →</a>
+                                        </div>
+                                    }
+                                }
+                            </article>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+        <p class="table-count">“To‘ladi” ustunida oxirgi 30 kun ichida qarzini yopganlar ko‘rinadi.</p>
+    }
+</section>
+
+@code {
+    private static readonly CultureInfo Uz = CultureInfo.GetCultureInfo("uz-Latn-UZ");
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+    private IReadOnlyList<DebtorCard>? debtors;
+    private IReadOnlyList<Branch> branches = [];
+    private int? branchId;
+    private string search = "";
+    private string? message;
+    private bool isError;
+
+    private int? editing;
+    private DebtStage editStage;
+    private DateOnly? editPromised;
+    private string editNote = "";
+
+    private IEnumerable<DebtorCard> Open => (debtors ?? []).Where(d => d.Stage != DebtStage.Paid);
+
+    private IEnumerable<DebtorCard> Filtered
+    {
+        get
+        {
+            var term = search.Trim();
+            var digits = new string(term.Where(char.IsDigit).ToArray());
+            return (debtors ?? []).Where(d => term.Length == 0 ||
+                d.StudentName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (digits.Length >= 3 && (new string(d.Phone.Where(char.IsDigit).ToArray()).Contains(digits) ||
+                                        new string(d.ParentPhone.Where(char.IsDigit).ToArray()).Contains(digits))));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            debtors = await Accounts.GetDebtorsAsync(branchId);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            debtors = [];
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private async Task ChangeBranch(ChangeEventArgs args)
+    {
+        branchId = int.TryParse(args.Value?.ToString(), out var id) ? id : null;
+        await Load();
+    }
+
+    private void StartEdit(DebtorCard card)
+    {
+        editing = card.StudentId;
+        editStage = card.Stage == DebtStage.New ? DebtStage.Contacted : card.Stage;
+        editPromised = card.PromisedOn ?? Today.AddDays(3);
+        editNote = card.Note;
+    }
+
+    private async Task Save(int studentId)
+    {
+        try
+        {
+            await Accounts.UpdateDebtCaseAsync(studentId, editStage, editPromised, editNote);
+            editing = null;
+            SetMessage("Holat saqlandi.", false);
+            await Load();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string Money(decimal amount) => $"{amount.ToString("N0", Uz)} so‘m";
+}

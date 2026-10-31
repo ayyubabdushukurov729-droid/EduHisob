@@ -1,0 +1,178 @@
+@page "/dars-jadvali"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject CenterDataService CenterData
+
+<PageTitle>Dars jadvali — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">@(SalesMode ? "SOTUV" : "TA’LIM JARAYONI")</p>
+            <h1>Dars jadvali</h1>
+            <p class="muted">@(SalesMode ? "Mijozga qaysi kun va soatda, qaysi guruhda bo‘sh joy borligini ayting." : "Faol guruhlarning haftalik takrorlanuvchi jadvali.")</p>
+        </div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice notice-error" role="status">@message</div>
+    }
+    @if (groups.Count > 0)
+    {
+        <section class="panel schedule-filters">
+            @if (branches.Count > 1)
+            {
+                <div>
+                    <label class="field-label" for="schedule-branch">Filial</label>
+                    <select @bind="selectedBranchId" id="schedule-branch" class="form-select">
+                        <option value="0">Barcha filiallar</option>
+                        @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+                    </select>
+                </div>
+            }
+            <div>
+                <label class="field-label" for="schedule-course">Kurs</label>
+                <select @bind="selectedCourse" id="schedule-course" class="form-select">
+                    <option value="">Barcha kurslar</option>
+                    @foreach (var course in groups.Select(g => g.CourseName).Distinct().Order()) { <option value="@course">@course</option> }
+                </select>
+            </div>
+            <label class="schedule-free-toggle"><input type="checkbox" class="form-check-input" @bind="onlyFree" /> Faqat bo‘sh joyi borlar</label>
+        </section>
+    }
+    @if (groups.Count == 0)
+    {
+        <section class="panel empty-state">
+            <h2>Jadval uchun faol guruh yo‘q</h2>
+            <p>Avval guruh ochib, hafta kunlari va dars vaqtini belgilang.</p>
+            <a class="btn btn-primary" href="/guruhlar">Kurs va guruhlarga o‘tish</a>
+        </section>
+    }
+    else
+    {
+        @if (SalesMode)
+        {
+            var open = Visible.Where(g => g.Capacity > g.StudentCount).OrderBy(g => g.CourseName).ThenBy(g => g.StartTime).ToList();
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">BO‘SH JOYLAR</p><h2>Yozilish mumkin bo‘lgan guruhlar (@open.Count)</h2></div><span class="chip chip-info">Jami @open.Sum(g => g.Capacity - g.StudentCount) ta joy</span></div>
+                @if (open.Count == 0)
+                {
+                    <p class="muted">Tanlangan shartlar bo‘yicha bo‘sh joy yo‘q.</p>
+                }
+                else
+                {
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>KURS / GURUH</th><th>KUNLAR VA VAQT</th><th>USTOZ</th><th>NARX</th><th>BO‘SH JOY</th></tr></thead>
+                            <tbody>
+                                @foreach (var group in open)
+                                {
+                                    <tr>
+                                        <td><strong>@group.CourseName</strong><br /><span class="muted">@group.Name · @group.BranchName</span></td>
+                                        <td>@DayNames(group.DaysOfWeek)<br /><span class="muted">@group.StartTime – @EndTime(group)</span></td>
+                                        <td>@(string.IsNullOrWhiteSpace(group.TeacherName) ? "—" : group.TeacherName)</td>
+                                        <td>@EduHisob.Data.Assistant.UzbekText.Money(group.MonthlyFee)<br /><span class="muted">oyiga</span></td>
+                                        <td><span class="status-badge @SeatCss(group)">@(group.Capacity - group.StudentCount) / @group.Capacity</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        }
+
+        <section class="schedule-week" aria-label="Haftalik dars jadvali">
+            @foreach (var day in weekdays)
+            {
+                var dayGroups = Visible
+                    .Where(group => group.DaysOfWeek.Split(',').Contains(((int)day.Day).ToString()))
+                    .OrderBy(group => group.StartTime)
+                    .ToList();
+                <article class="panel schedule-day">
+                    <div class="panel-heading"><div><p class="eyebrow">HAFTA KUNI</p><h2>@day.Label</h2></div><span class="schedule-count">@dayGroups.Count</span></div>
+                    @if (dayGroups.Count == 0)
+                    {
+                        <p class="muted schedule-empty">Dars rejalashtirilmagan</p>
+                    }
+                    else
+                    {
+                        <div class="schedule-list">
+                            @foreach (var group in dayGroups)
+                            {
+                                <article class="schedule-card">
+                                    <strong class="schedule-time">@group.StartTime – @EndTime(group)</strong>
+                                    <span class="schedule-group">@group.Name</span>
+                                    <span class="muted">@group.CourseName · @group.BranchName</span>
+                                    @if (!string.IsNullOrWhiteSpace(group.TeacherName)) { <span class="muted">Ustoz: @group.TeacherName</span> }
+                                    @if (!string.IsNullOrWhiteSpace(group.RoomName)) { <span class="muted">Xona: @group.RoomName</span> }
+                                    <span class="status-badge @SeatCss(group) schedule-seats">@SeatText(group)</span>
+                                </article>
+                            }
+                        </div>
+                    }
+                </article>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "sotuv")]
+    private int? SalesQuery { get; set; }
+
+    private readonly (DayOfWeek Day, string Label)[] weekdays =
+    [
+        (DayOfWeek.Monday, "Dushanba"), (DayOfWeek.Tuesday, "Seshanba"),
+        (DayOfWeek.Wednesday, "Chorshanba"), (DayOfWeek.Thursday, "Payshanba"),
+        (DayOfWeek.Friday, "Juma"), (DayOfWeek.Saturday, "Shanba"),
+        (DayOfWeek.Sunday, "Yakshanba")
+    ];
+    private IReadOnlyList<Branch> branches = [];
+    private IReadOnlyList<StudyGroupSummary> groups = [];
+    private int selectedBranchId;
+    private string selectedCourse = "";
+    private bool onlyFree;
+    private string? message;
+
+    private bool SalesMode => SalesQuery == 1;
+
+    private IEnumerable<StudyGroupSummary> Visible => groups
+        .Where(group => selectedBranchId == 0 || group.BranchId == selectedBranchId)
+        .Where(group => selectedCourse.Length == 0 || group.CourseName == selectedCourse)
+        .Where(group => !onlyFree || group.Capacity > group.StudentCount);
+
+    // Sotuv va Ta'lim menyusidagi havolalar bitta sahifani ochadi: rejim har safar manzildan olinadi.
+    protected override void OnParametersSet() => onlyFree = SalesMode;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+            groups = await CenterData.GetStudyGroupsAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            message = exception.Message;
+        }
+    }
+
+    private static string EndTime(StudyGroupSummary group) =>
+        TimeOnly.TryParse(group.StartTime, out var start) ? start.AddMinutes(group.LessonDurationMinutes).ToString("HH:mm") : "";
+
+    private static string SeatText(StudyGroupSummary group)
+    {
+        var free = group.Capacity - group.StudentCount;
+        return free > 0 ? $"{free} ta bo‘sh joy" : "To‘lgan";
+    }
+
+    private static string SeatCss(StudyGroupSummary group)
+    {
+        var free = group.Capacity - group.StudentCount;
+        return free <= 0 ? "status-muted" : free <= 2 ? "status-trial" : "status-active";
+    }
+
+    private string DayNames(string days) => string.Join(", ", days.Split(',', StringSplitOptions.RemoveEmptyEntries)
+        .Select(day => weekdays.FirstOrDefault(item => ((int)item.Day).ToString() == day).Label is { Length: >= 3 } label ? label[..3] : day));
+}

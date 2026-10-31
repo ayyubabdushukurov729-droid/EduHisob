@@ -1,0 +1,84 @@
+﻿@inherits LayoutComponentBase
+@inject CenterAccess Access
+@inject IConfiguration Configuration
+
+<div class="app-shell">
+    <aside class="app-sidebar">
+        <NavMenu />
+    </aside>
+    <main class="app-main">
+        <header class="app-topbar">
+            <a class="brand" href="/boshqaruv"><span class="brand-mark small">E</span><span>EduHisob</span></a>
+            <AuthorizeView>
+                <Authorized>
+                    @* Oddiy GET forma: interaktiv rejimsiz ham ishlaydi. *@
+                    <form class="topbar-search" action="/qidiruv" method="get" role="search">
+                        <input type="search" name="q" placeholder="Qidirish: o‘quvchi, telefon, guruh, sahifa..." aria-label="Umumiy qidiruv" />
+                    </form>
+                    @{
+                        var displayName = context.User.FindFirst("full_name")?.Value is { Length: > 0 } fullName ? fullName : context.User.Identity?.Name ?? "";
+                        var roleLabel = Enum.TryParse<CenterRole>(context.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value, out var role) ? CenterRoles.Label(role) : "";
+                    }
+                    @* Elektron pochta o'rniga ism va rol: qisqa va tushunarli. *@
+                    <div class="topbar-account" title="@context.User.Identity?.Name"><span class="account-avatar">@(displayName.FirstOrDefault().ToString().ToUpperInvariant())</span><span><strong>@displayName</strong>@if (roleLabel.Length > 0) { <small>@roleLabel</small> }</span></div>
+                </Authorized>
+            </AuthorizeView>
+        </header>
+        <article class="app-content">
+            @if (isPlatformAdmin)
+            {
+                <section class="workspace">
+                    <div class="empty-state">
+                        <span class="empty-icon">▦</span>
+                        <h2>Siz platforma egasisiz</h2>
+                        <p>Markazlarni, ularning hisobotlarini va obuna to‘lovlarini platforma kabinetida boshqarasiz.</p>
+                        <a class="btn btn-primary" href="/platforma">Platforma kabinetiga o‘tish</a>
+                    </div>
+                </section>
+            }
+            else if (centerLock is not null)
+            {
+                <section class="workspace">
+                    <div class="empty-state center-lock">
+                        <span class="empty-icon">@(centerLock.Blocked ? "⊘" : "⏳")</span>
+                        <h2>@(centerLock.Blocked ? "Kabinet vaqtincha yopilgan" : "Obuna muddati tugagan")</h2>
+                        <p>@centerLock.Message</p>
+                        <p class="muted">Ma’lumotlaringiz saqlanib turibdi — to‘lovdan keyin kabinet darhol ochiladi.</p>
+                        @if (!string.IsNullOrWhiteSpace(ContactPhone))
+                        {
+                            <p>To‘lov va savollar uchun: <a href="tel:@ContactPhone"><strong>@ContactPhone</strong></a></p>
+                        }
+                    </div>
+                </section>
+            }
+            else
+            {
+                @Body
+            }
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Kutilmagan xatolik yuz berdi.
+    <a href="." class="reload">Sahifani yangilash</a>
+    <span class="dismiss" aria-label="Yopish">×</span>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    private CenterLock? centerLock;
+    private bool isPlatformAdmin;
+
+    // To'lov haqida murojaat uchun telefon: PlatformAdmin:ContactPhone, bo'lmasa PlatformAdmin:Phone.
+    private string? ContactPhone => Configuration["PlatformAdmin:ContactPhone"] is { Length: > 0 } phone ? phone : Configuration["PlatformAdmin:Phone"];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var user = AuthenticationState is null ? null : (await AuthenticationState).User;
+        isPlatformAdmin = user?.HasClaim(PlatformAdminDataService.ClaimType, "true") == true;
+        centerLock = user?.Identity?.IsAuthenticated == true && !isPlatformAdmin ? await Access.GetLockAsync() : null;
+    }
+}

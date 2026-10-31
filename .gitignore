@@ -1,0 +1,11 @@
+bin/
+obj/
+Data/*.db
+Data/*.db-shm
+Data/*.db-wal
+*.user
+*.suo
+.vs/
+.env
+appsettings.Development.json
+Data/*.db.bak

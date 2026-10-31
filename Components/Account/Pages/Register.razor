@@ -1,0 +1,186 @@
+﻿@page "/Account/Register"
+@layout EduHisob.Components.Layout.LandingLayout
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using EduHisob.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IUserStore<ApplicationUser> UserStore
+@inject SignInManager<ApplicationUser> SignInManager
+@inject ApplicationDbContext DbContext
+@inject ILogger<Register> Logger
+@inject IdentityRedirectManager RedirectManager
+@inject RegistrationAvailability Registration
+
+<PageTitle>Markaz ochish — EduHisob</PageTitle>
+
+<main class="auth-page">
+<section class="auth-card">
+    <a class="brand auth-brand" href="/"><span class="brand-mark">E</span><span>EduHisob</span></a>
+    @if (!Registration.Enabled)
+    {
+        <p class="eyebrow">RO‘YXATDAN O‘TISH</p>
+        <h1>Yangi hisob ochish vaqtincha yopiq</h1>
+        <p class="muted">Hisoblarni xavfsiz tasdiqlash xizmati tayyorlanmoqda. Mavjud hisobingiz bo‘lsa, tizimga kirishingiz mumkin.</p>
+    }
+    else
+    {
+        <p class="eyebrow">EDUHISOB’GA QO‘SHILING</p>
+        <h1>Markazingiz uchun kabinet oching</h1>
+        <p class="muted">Markaz va o‘quvchi ma’lumotlari alohida tashkilot kabinetingizda saqlanadi.</p>
+
+        <StatusMessage Message="@Message" />
+        <EditForm Model="Input" method="post" OnValidSubmit="RegisterUser" FormName="register">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="validation-summary" role="alert" />
+            <label class="field-label" for="center">Markaz nomi</label>
+            <InputText @bind-Value="Input.CenterName" id="center" class="form-control" autocomplete="organization" />
+            <ValidationMessage For="() => Input.CenterName" />
+            <label class="field-label" for="name">Sizning ismingiz</label>
+            <InputText @bind-Value="Input.FullName" id="name" class="form-control" autocomplete="name" placeholder="Ism familiya" />
+            <ValidationMessage For="() => Input.FullName" />
+            <label class="field-label" for="phone">Telefon raqami</label>
+            <InputText @bind-Value="Input.Phone" id="phone" class="form-control" autocomplete="tel" placeholder="+998 90 123 45 67" />
+            <ValidationMessage For="() => Input.Phone" />
+            <label class="field-label" for="email">Elektron pochta</label>
+            <InputText @bind-Value="Input.Email" id="email" class="form-control" autocomplete="email" placeholder="siz@markaz.uz" />
+            <ValidationMessage For="() => Input.Email" />
+            <label class="field-label" for="password">Parol</label>
+            <InputText type="password" @bind-Value="Input.Password" id="password" class="form-control" autocomplete="new-password" />
+            <ValidationMessage For="() => Input.Password" />
+            <label class="field-label" for="confirm-password">Parolni qayta kiriting</label>
+            <InputText type="password" @bind-Value="Input.ConfirmPassword" id="confirm-password" class="form-control" autocomplete="new-password" />
+            <ValidationMessage For="() => Input.ConfirmPassword" />
+            <button type="submit" class="btn btn-primary auth-submit">Markaz kabinetini ochish</button>
+        </EditForm>
+        <p class="muted auth-footnote">Hisob ochish orqali xizmatdan foydalanish shartlariga rozilik bildirasiz.</p>
+    }
+    <a class="auth-link" href="Account/Login">Avvaldan hisobingiz bormi? Kirish</a>
+</section>
+</main>
+
+@code {
+    private IEnumerable<IdentityError>? identityErrors;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? Message => identityErrors is null ? null : string.Join(", ", identityErrors.Select(error => error.Description));
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+    }
+
+    public async Task RegisterUser(EditContext editContext)
+    {
+        if (!Registration.Enabled)
+        {
+            return;
+        }
+
+        await using var transaction = await DbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var center = new Organization
+            {
+                Name = Input.CenterName.Trim(),
+                OwnerPhone = Input.Phone.Trim(),
+                TrialEndsAtUtc = DateTime.UtcNow.AddDays(14)
+            };
+            DbContext.Organizations.Add(center);
+            await DbContext.SaveChangesAsync();
+
+            var user = CreateUser();
+            user.OrganizationId = center.Id;
+            user.PhoneNumber = Input.Phone.Trim();
+            user.FullName = Input.FullName.Trim();
+            await UserStore.SetUserNameAsync(user, Input.Email.Trim(), CancellationToken.None);
+            var emailStore = GetEmailStore();
+            await emailStore.SetEmailAsync(user, Input.Email.Trim(), CancellationToken.None);
+
+            var result = await UserManager.CreateAsync(user, Input.Password);
+            if (!result.Succeeded)
+            {
+                identityErrors = result.Errors;
+                await transaction.RollbackAsync();
+                return;
+            }
+
+            DbContext.Branches.Add(new Branch { OrganizationId = center.Id, Name = "Asosiy filial" });
+            await DbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            Logger.LogInformation("A new EduHisob organization was registered.");
+            await SignInManager.SignInAsync(user, isPersistent: false);
+            RedirectManager.RedirectTo(ReturnUrl ?? "/boshqaruv");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await transaction.RollbackAsync();
+            Logger.LogError(exception, "EduHisob organization registration failed.");
+            identityErrors = [new IdentityError { Description = "Hisobni yaratishda xatolik yuz berdi. Kiritilgan ma’lumotlarni tekshirib, qayta urinib ko‘ring." }];
+        }
+    }
+
+    private ApplicationUser CreateUser()
+    {
+        try
+        {
+            return Activator.CreateInstance<ApplicationUser>();
+        }
+        catch
+        {
+            throw new InvalidOperationException($"Can't create an instance of '{nameof(ApplicationUser)}'. " +
+                $"Ensure that '{nameof(ApplicationUser)}' is not an abstract class and has a parameterless constructor.");
+        }
+    }
+
+    private IUserEmailStore<ApplicationUser> GetEmailStore()
+    {
+        if (!UserManager.SupportsUserEmail)
+        {
+            throw new NotSupportedException("The default UI requires a user store with email support.");
+        }
+        return (IUserEmailStore<ApplicationUser>)UserStore;
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [StringLength(160, MinimumLength = 2)]
+        [Display(Name = "Markaz nomi")]
+        public string CenterName { get; set; } = "";
+
+        [Required]
+        [StringLength(120, MinimumLength = 2)]
+        [Display(Name = "Ism familiya")]
+        public string FullName { get; set; } = "";
+
+        [Required]
+        [Phone]
+        [StringLength(32)]
+        [Display(Name = "Telefon raqami")]
+        public string Phone { get; set; } = "";
+
+        [Required]
+        [EmailAddress]
+        [Display(Name = "Elektron pochta")]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [StringLength(100, ErrorMessage = "{0} kamida {2} ta belgidan iborat bo‘lsin.", MinimumLength = 8)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Parolni qayta kiriting")]
+        [Compare("Password", ErrorMessage = "The password and confirmation password do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

@@ -1,0 +1,238 @@
+@page "/xodimlar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Hr)]
+@using System.ComponentModel.DataAnnotations
+@inject CenterDataService CenterData
+
+<PageTitle>Xodimlar va ustozlar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading"><div><p class="eyebrow">HR BOSHQARUVI</p><h1>Xodimlar va ustozlar</h1><p class="muted">Ustoz uchun haq sxemasini tanlang: faqat oylik, faqat foiz yoki oylik + foiz. Foiz guruhga qabul qilingan to‘lovlardan hisoblanadi.</p></div></div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+    <div class="workspace-grid branch-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">JAMOA</p><h2>@employees.Count nafar faol xodim</h2></div></div>
+            @if (employees.Count == 0)
+            {
+                <p class="muted">Hozircha xodim qo‘shilmagan.</p>
+            }
+            else
+            {
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead><tr><th>ISM / LAVOZIM</th><th>TELEFON / FILIAL</th><th>HAQ SXEMASI</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var employee in employees)
+                            {
+                                <tr>
+                                    <td><strong>@employee.FullName</strong><br /><span class="muted">@RoleName(employee.Role) · @employee.Position · @employee.HiredOn.ToString("dd.MM.yyyy") dan</span></td>
+                                    <td>@employee.Phone<br /><span class="muted">@employee.BranchName</span></td>
+                                    <td><strong>@PayText(employee)</strong><br /><span class="muted">@PayTypeName(employee.PayType)</span></td>
+                                    <td><button type="button" class="btn btn-secondary btn-small" @onclick="() => StartEdit(employee)">Tahrirlash</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+        <section class="panel">
+            <div class="panel-heading">
+                <div><p class="eyebrow">@(editingId is null ? "YANGI JAMOA A’ZOSI" : "TAHRIRLASH")</p><h2>@(editingId is null ? "Xodim qo‘shish" : input.FullName)</h2></div>
+                @if (editingId is not null) { <button type="button" class="btn btn-secondary btn-small" @onclick="CancelEdit">Bekor</button> }
+            </div>
+            @if (branches.Count == 0)
+            {
+                <p class="muted">Xodim qo‘shish uchun faol filial kerak.</p>
+            }
+            else
+            {
+                <EditForm Model="input" OnValidSubmit="SaveEmployee" FormName="employee-form">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="validation-summary" />
+                    <label class="field-label" for="employee-name">Ism familiya</label>
+                    <InputText @bind-Value="input.FullName" id="employee-name" class="form-control" />
+                    <ValidationMessage For="() => input.FullName" />
+                    <label class="field-label" for="employee-position">Lavozim</label>
+                    <InputText @bind-Value="input.Position" id="employee-position" class="form-control" />
+                    <ValidationMessage For="() => input.Position" />
+                    <label class="field-label" for="employee-role">Xodim turi</label>
+                    <InputSelect @bind-Value="input.Role" id="employee-role" class="form-select">
+                        <option value="@EmployeeRole.Teacher">Ustoz</option>
+                        <option value="@EmployeeRole.Staff">Xodim</option>
+                    </InputSelect>
+                    <label class="field-label" for="employee-phone">Telefon</label>
+                    <InputText @bind-Value="input.Phone" id="employee-phone" class="form-control" />
+                    <ValidationMessage For="() => input.Phone" />
+                    <label class="field-label" for="employee-branch">Filial</label>
+                    <InputSelect @bind-Value="input.BranchId" id="employee-branch" class="form-select">
+                        @foreach (var branch in branches) { <option value="@branch.Id">@branch.Name</option> }
+                    </InputSelect>
+                    <label class="field-label" for="employee-hired">Ish boshlagan sana</label>
+                    <InputDate @bind-Value="input.HiredOn" id="employee-hired" class="form-control" />
+                    @if (input.Role == EmployeeRole.Teacher)
+                    {
+                        <label class="field-label" for="employee-paytype">Haq sxemasi</label>
+                        <InputSelect @bind-Value="input.PayType" id="employee-paytype" class="form-select">
+                            <option value="@EmployeePayType.SalaryAndShare">Oylik + foiz</option>
+                            <option value="@EmployeePayType.SalaryOnly">Faqat oylik</option>
+                            <option value="@EmployeePayType.ShareOnly">Faqat foiz</option>
+                        </InputSelect>
+                    }
+                    @if (input.Role == EmployeeRole.Staff || input.PayType != EmployeePayType.ShareOnly)
+                    {
+                        <label class="field-label" for="employee-salary">Kelishilgan oylik (so‘m)</label>
+                        <InputNumber @bind-Value="input.AgreedMonthlySalary" id="employee-salary" class="form-control" />
+                        <ValidationMessage For="() => input.AgreedMonthlySalary" />
+                    }
+                    @if (input.Role == EmployeeRole.Teacher && input.PayType != EmployeePayType.SalaryOnly)
+                    {
+                        <p class="muted" style="margin-top:6px">Ustoz foizi Moliya → Ustozlar ulushi bo‘limida belgilanadi.</p>
+                    }
+                    <button class="btn btn-primary form-submit" type="submit">@(editingId is null ? "Xodimni saqlash" : "O‘zgarishlarni saqlash")</button>
+                </EditForm>
+            }
+        </section>
+    </div>
+</section>
+
+@code {
+    private EmployeeInput input = new();
+    private IReadOnlyList<EmployeeSummary> employees = [];
+    private IReadOnlyList<Branch> branches = [];
+    private int? editingId;
+    private string? message;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            branches = await CenterData.GetBranchesAsync();
+            if (branches.Count > 0) input.BranchId = branches[0].Id;
+            employees = await CenterData.GetEmployeesAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetMessage(exception.Message, true);
+        }
+    }
+
+    private void StartEdit(EmployeeSummary employee)
+    {
+        editingId = employee.Id;
+        message = null;
+        input = new EmployeeInput
+        {
+            FullName = employee.FullName,
+            Position = employee.Position,
+            Phone = employee.Phone,
+            Role = employee.Role,
+            BranchId = employee.BranchId,
+            HiredOn = employee.HiredOn,
+            AgreedMonthlySalary = employee.AgreedMonthlySalary,
+            PayType = employee.PayType,
+            DefaultSharePercent = employee.DefaultSharePercent
+        };
+    }
+
+    private void CancelEdit()
+    {
+        editingId = null;
+        input = new EmployeeInput { BranchId = branches.Count > 0 ? branches[0].Id : 0 };
+    }
+
+    private async Task SaveEmployee()
+    {
+        try
+        {
+            var employee = new Employee
+            {
+                Id = editingId ?? 0,
+                FullName = input.FullName,
+                Phone = input.Phone,
+                Position = input.Position,
+                Role = input.Role,
+                BranchId = input.BranchId,
+                HiredOn = input.HiredOn,
+                AgreedMonthlySalary = input.AgreedMonthlySalary,
+                PayType = input.PayType,
+                DefaultSharePercent = input.DefaultSharePercent
+            };
+            if (editingId is null)
+            {
+                await CenterData.AddEmployeeAsync(employee);
+            }
+            else
+            {
+                await CenterData.UpdateEmployeeAsync(employee);
+            }
+            var saved = editingId is null ? "Xodim muvaffaqiyatli saqlandi." : "O‘zgarishlar saqlandi. Ish haqi yangi sxema bo‘yicha hisoblanadi.";
+            CancelEdit();
+            employees = await CenterData.GetEmployeesAsync();
+            SetMessage(saved, false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            SetMessage(exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Xodimni saqlab bo‘lmadi." : exception.Message, true);
+        }
+    }
+
+    private void SetMessage(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string RoleName(EmployeeRole role) => role == EmployeeRole.Teacher ? "Ustoz" : "Xodim";
+
+    private static string PayTypeName(EmployeePayType type) => type switch
+    {
+        EmployeePayType.SalaryOnly => "Faqat oylik",
+        EmployeePayType.ShareOnly => "Faqat foiz",
+        _ => "Oylik + foiz"
+    };
+
+    private static string PayText(EmployeeSummary employee)
+    {
+        var salary = $"{employee.AgreedMonthlySalary:N0} so‘m";
+        var share = "foiz (moliyada)";
+        return employee.PayType switch
+        {
+            EmployeePayType.SalaryOnly => salary,
+            EmployeePayType.ShareOnly => share,
+            _ => $"{salary} + {share}"
+        };
+    }
+
+    private sealed class EmployeeInput
+    {
+        [Required(ErrorMessage = "Ism familiyani kiriting.")]
+        [StringLength(160, MinimumLength = 2)]
+        public string FullName { get; set; } = "";
+
+        [Required(ErrorMessage = "Lavozimni kiriting.")]
+        [StringLength(120, MinimumLength = 2)]
+        public string Position { get; set; } = "";
+
+        [Required]
+        [Phone(ErrorMessage = "Telefon raqamini tekshiring.")]
+        [StringLength(32)]
+        public string Phone { get; set; } = "";
+
+        public EmployeeRole Role { get; set; } = EmployeeRole.Teacher;
+        public int BranchId { get; set; }
+        public DateOnly HiredOn { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+
+        [Range(typeof(decimal), "0", "999999999", ErrorMessage = "Oylik manfiy bo‘lmasin.")]
+        public decimal AgreedMonthlySalary { get; set; }
+
+        public EmployeePayType PayType { get; set; } = EmployeePayType.SalaryAndShare;
+
+        [Range(typeof(decimal), "0", "100", ErrorMessage = "Foiz 0 dan 100 gacha bo‘lsin.")]
+        public decimal DefaultSharePercent { get; set; }
+    }
+}

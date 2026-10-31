@@ -1,0 +1,11 @@
+﻿@inject NavigationManager NavigationManager
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Platforma sahifalari o'z kirish sahifasiga yuboradi.
+        var path = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        var login = path.StartsWith("platforma", StringComparison.OrdinalIgnoreCase) ? "platforma/kirish" : "Account/Login";
+        NavigationManager.NavigateTo($"{login}?returnUrl={Uri.EscapeDataString(NavigationManager.Uri)}", forceLoad: true);
+    }
+}

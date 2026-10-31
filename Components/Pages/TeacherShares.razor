@@ -1,0 +1,213 @@
+@page "/ustoz-ulushi"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.Finance)]
+@inject CenterDataService CenterData
+
+<PageTitle>Ustozlar ulushi — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">MOLIYA</p>
+            <h1>Ustozlar ulushi</h1>
+            <p class="muted">Ustoz guruh tushumidan necha foiz olishi faqat shu yerda belgilanadi. Ustozning odatiy foizi yangi guruhlarga avtomatik qo‘yiladi, har bir guruhda alohida o‘zgartirish mumkin.</p>
+        </div>
+        <div>
+            <label class="field-label" for="share-month">Oy</label>
+            <input id="share-month" type="month" class="form-control" value="@month.ToString("yyyy-MM")" @onchange="ChangeMonth" />
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+
+    @if (rows is null)
+    {
+        <div class="notice">Yuklanmoqda...</div>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="empty-state">
+            <span class="empty-icon">♙</span>
+            <h2>Ustozlar yo‘q</h2>
+            <p>Avval Xodimlar bo‘limida ustoz qo‘shing.</p>
+        </div>
+    }
+    else
+    {
+        <div class="metric-grid finance-metrics">
+            <article class="metric-card"><span class="metric-label">Guruhlar tushumi</span><strong>@Money(rows.Sum(r => r.Groups.Sum(g => g.MonthIncome)))</strong><span class="metric-caption">@MonthName · ustozli guruhlar</span></article>
+            <article class="metric-card"><span class="metric-label">Ustozlar ulushi</span><strong>@Money(rows.Sum(r => r.Groups.Sum(g => g.MonthShare)))</strong><span class="metric-caption">shu oy tushumidan hisoblangan</span></article>
+            <article class="metric-card"><span class="metric-label">Foizsiz guruhlar</span><strong>@rows.Where(r => r.PayType != EmployeePayType.SalaryOnly).Sum(r => r.Groups.Count(g => g.SharePercent == 0))</strong><span class="metric-caption">foiz oluvchi ustozlarda</span></article>
+        </div>
+
+        @foreach (var teacher in rows)
+        {
+            var draft = drafts[teacher.EmployeeId];
+            <section class="panel share-panel">
+                <div class="share-head">
+                    <div>
+                        <h2>@teacher.FullName</h2>
+                        <span class="muted">@PayLabel(teacher)</span>
+                    </div>
+                    @if (teacher.PayType == EmployeePayType.SalaryOnly)
+                    {
+                        <span class="chip">Faqat oylik — foiz olmaydi</span>
+                    }
+                    else
+                    {
+                        <div class="share-default">
+                            <label class="field-label" for="def-@teacher.EmployeeId">Odatiy foiz</label>
+                            <div class="platform-inline">
+                                <input id="def-@teacher.EmployeeId" type="number" min="0" max="100" step="0.5" class="form-control" @bind="draft.DefaultPercent" />
+                                <button class="btn btn-secondary" @onclick="() => SaveDefault(teacher, draft)" disabled="@busy">Saqlash</button>
+                            </div>
+                            <label class="form-check-label muted"><input type="checkbox" class="form-check-input" @bind="draft.ApplyToGroups" /> mavjud guruhlariga ham qo‘llash</label>
+                        </div>
+                    }
+                </div>
+
+                @if (teacher.Groups.Count == 0)
+                {
+                    <p class="muted">Faol guruhi yo‘q.</p>
+                }
+                else
+                {
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>GURUH</th><th>O‘QUVCHI</th><th>OYLIK NARX</th><th>@MonthName TUSHUMI</th><th>FOIZ</th><th>ULUSH</th></tr></thead>
+                            <tbody>
+                                @foreach (var group in teacher.Groups)
+                                {
+                                    <tr>
+                                        <td><a href="/guruhlar/@group.GroupId"><strong>@group.Name</strong></a></td>
+                                        <td>@group.StudentCount</td>
+                                        <td>@Money(group.MonthlyFee)</td>
+                                        <td>@Money(group.MonthIncome)</td>
+                                        <td>
+                                            @if (teacher.PayType == EmployeePayType.SalaryOnly)
+                                            {
+                                                <span class="muted">—</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="platform-inline share-input">
+                                                    <input type="number" min="0" max="100" step="0.5" class="form-control" @bind="draft.GroupPercents[group.GroupId]" aria-label="@group.Name foizi" />
+                                                    @if (draft.GroupPercents[group.GroupId] != group.SharePercent)
+                                                    {
+                                                        <button class="btn btn-primary" @onclick="() => SaveGroup(group, draft.GroupPercents[group.GroupId])" disabled="@busy">✓</button>
+                                                    }
+                                                </div>
+                                            }
+                                        </td>
+                                        <td><strong>@Money(group.MonthShare)</strong></td>
+                                    </tr>
+                                }
+                                <tr class="share-total"><td colspan="3">Jami</td><td>@Money(teacher.Groups.Sum(g => g.MonthIncome))</td><td></td><td><strong>@Money(teacher.Groups.Sum(g => g.MonthShare))</strong></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        }
+        <p class="muted">Ulush shu oyda guruh uchun qabul qilingan to‘lovlardan hisoblanadi va “Ish haqi” sahifasida ustozning oyligiga qo‘shiladi. Har bir o‘zgarish moliya tarixiga yoziladi.</p>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<TeacherShareRow>? rows;
+    private readonly Dictionary<int, Draft> drafts = [];
+    private DateOnly month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private string? message;
+    private bool isError;
+    private bool busy;
+
+    private string MonthName => EduHisob.Data.Assistant.UzbekText.MonthName(month);
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            rows = await CenterData.GetTeacherSharesAsync(month);
+            drafts.Clear();
+            foreach (var teacher in rows)
+            {
+                drafts[teacher.EmployeeId] = new Draft
+                {
+                    DefaultPercent = Plain(teacher.DefaultSharePercent),
+                    GroupPercents = teacher.Groups.ToDictionary(group => group.GroupId, group => Plain(group.SharePercent))
+                };
+            }
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            rows = [];
+            Show(exception.Message, true);
+        }
+    }
+
+    private async Task ChangeMonth(ChangeEventArgs args)
+    {
+        if (DateOnly.TryParseExact($"{args.Value}-01", "yyyy-MM-dd", out var selected))
+        {
+            month = selected;
+            await LoadAsync();
+        }
+    }
+
+    private Task SaveDefault(TeacherShareRow teacher, Draft draft) => RunAsync(
+        () => CenterData.SetTeacherDefaultShareAsync(teacher.EmployeeId, draft.DefaultPercent, draft.ApplyToGroups),
+        $"{teacher.FullName}: odatiy foiz {draft.DefaultPercent:0.##}%" + (draft.ApplyToGroups ? ", barcha guruhlariga qo‘llandi." : ". Yangi guruhlarga qo‘yiladi."));
+
+    private Task SaveGroup(TeacherShareGroup group, decimal percent) => RunAsync(
+        () => CenterData.SetGroupShareAsync(group.GroupId, percent),
+        $"{group.Name}: ustoz ulushi {percent:0.##}%.");
+
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+            Show(success, false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            Show(exception.Message, true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Show(string text, bool error)
+    {
+        message = text;
+        isError = error;
+    }
+
+    private static string PayLabel(TeacherShareRow teacher) => teacher.PayType switch
+    {
+        EmployeePayType.SalaryOnly => $"Faqat oylik: {Money(teacher.AgreedMonthlySalary)}",
+        EmployeePayType.ShareOnly => "Faqat foiz",
+        _ => $"Oylik {Money(teacher.AgreedMonthlySalary)} + foiz"
+    };
+
+    private static string Money(decimal amount) => EduHisob.Data.Assistant.UzbekText.Money(amount);
+
+    // Bazadan kelgan "20.0" ni maydonda "20" qilib ko'rsatadi (ortiqcha nollarsiz).
+    private static decimal Plain(decimal value) => value / 1.0000000000000000000000000000m;
+
+    private sealed class Draft
+    {
+        public decimal DefaultPercent { get; set; }
+        public bool ApplyToGroups { get; set; }
+        public Dictionary<int, decimal> GroupPercents { get; set; } = [];
+    }
+}

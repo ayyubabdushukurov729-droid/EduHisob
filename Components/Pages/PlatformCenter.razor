@@ -1,0 +1,472 @@
+@page "/platforma/markazlar/{Id:int}"
+@layout PlatformLayout
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = PlatformAdminDataService.Policy)]
+@using System.Globalization
+@inject PlatformAdminDataService Platform
+@inject NavigationManager Navigation
+
+<PageTitle>@(detail?.Center.Name ?? "Markaz") — Platforma</PageTitle>
+
+<section class="workspace">
+    <a class="back-link" href="/platforma/markazlar">← Markazlar</a>
+
+    @if (detail is null)
+    {
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="notice notice-error" role="alert">@error</div>
+        }
+        else
+        {
+            <div class="notice">Yuklanmoqda...</div>
+        }
+    }
+    else
+    {
+        var center = detail.Center;
+        <div class="page-heading">
+            <div>
+                <p class="eyebrow">MARKAZ</p>
+                <h1>@center.Name <span class="status-badge @CenterStatuses.Css(center.Status)">@CenterStatuses.Label(center.Status)</span></h1>
+                <p class="muted">Rahbar: @(center.OwnerName.Length > 0 ? center.OwnerName : "—") · @center.OwnerPhone · @center.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy") dan beri</p>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(notice))
+        {
+            <div class="notice notice-success" role="status">@notice</div>
+        }
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="notice notice-error" role="alert">@error</div>
+        }
+        @if (center.IsBlocked)
+        {
+            <div class="notice notice-error">Kabinet bloklangan@(detail.BlockReason.Length > 0 ? $": {detail.BlockReason}" : ".") Markaz xodimlari hech narsa qila olmaydi.</div>
+        }
+
+        <div class="metric-grid platform-metrics">
+            <article class="metric-card"><span class="metric-label">Kirish muddati</span><strong>@center.AccessEndsAtUtc.ToLocalTime().ToString("dd.MM.yyyy")</strong><span class="metric-caption">@PlatformCenters.DaysLeft(center) · @(center.PaidUntilUtc is null ? "sinov" : "to‘langan")</span></article>
+            <article class="metric-card"><span class="metric-label">Oylik to‘lov</span><strong>@(center.MonthlyFee > 0 ? PlatformHome.Money(center.MonthlyFee) : "—")</strong><span class="metric-caption">kelishilgan narx</span></article>
+            <article class="metric-card"><span class="metric-label">Jami to‘lagan</span><strong>@PlatformHome.Money(center.PaidTotal)</strong><span class="metric-caption">@detail.Payments.Count ta to‘lov</span></article>
+            <article class="metric-card"><span class="metric-label">O‘quvchilar</span><strong>@center.StudentCount</strong><span class="metric-caption">@center.ActiveStudentCount faol · @center.ActiveGroupCount guruh</span></article>
+        </div>
+
+        <div class="workspace-grid branch-grid">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">OBUNA</p><h2>To‘lov qabul qilish</h2><p class="muted">Muddat @center.AccessEndsAtUtc.ToLocalTime().ToString("dd.MM.yyyy") dan (o‘tgan bo‘lsa bugundan) boshlab uzayadi. Kabinet darhol ochiladi.</p></div></div>
+                <div class="platform-form-grid">
+                    <div><label class="field-label" for="pay-months">Necha oy</label><input id="pay-months" type="number" min="1" max="36" class="form-control" @bind="payMonths" @bind:after="SuggestAmount" /></div>
+                    <div><label class="field-label" for="pay-amount">Summa (so‘m)</label><input id="pay-amount" type="number" min="0" class="form-control" @bind="payAmount" /></div>
+                    <div>
+                        <label class="field-label" for="pay-method">To‘lov usuli</label>
+                        <select id="pay-method" class="form-select" @bind="payMethod">
+                            <option value="@PaymentMethod.Cash">Naqd</option>
+                            <option value="@PaymentMethod.Card">Karta</option>
+                            <option value="@PaymentMethod.Terminal">Terminal</option>
+                            <option value="@PaymentMethod.BankTransfer">Bank o‘tkazmasi</option>
+                        </select>
+                    </div>
+                    <div><label class="field-label" for="pay-note">Izoh</label><input id="pay-note" class="form-control" @bind="payNote" placeholder="ixtiyoriy" /></div>
+                </div>
+                <div class="form-actions"><button class="btn btn-primary" @onclick="PayAsync" disabled="@busy">To‘lovni yozish</button></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">SOZLAMALAR</p><h2>Markaz ma’lumotlari</h2></div></div>
+                <div class="platform-form-grid">
+                    <div><label class="field-label" for="set-name">Markaz nomi</label><input id="set-name" class="form-control" @bind="editName" /></div>
+                    <div><label class="field-label" for="set-fee">Oylik to‘lov (so‘m)</label><input id="set-fee" type="number" min="0" class="form-control" @bind="editFee" /></div>
+                </div>
+                <label class="field-label" for="set-note">Ichki izoh (faqat siz ko‘rasiz)</label>
+                <textarea id="set-note" class="form-control" rows="2" @bind="editNote" placeholder="Masalan: shartnoma №12, chegirma 1 yilga"></textarea>
+                <div class="form-actions"><button class="btn btn-secondary" @onclick="SaveSettingsAsync" disabled="@busy">Saqlash</button></div>
+            </section>
+        </div>
+
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">BOSHQARUV</p><h2>Amallar</h2></div></div>
+            <div class="platform-actions">
+                <div class="platform-action">
+                    <strong>Bepul muddatni uzaytirish</strong>
+                    <span class="muted">To‘lovsiz qo‘shimcha kun berish.</span>
+                    <div class="platform-inline"><input type="number" min="1" max="365" class="form-control" @bind="trialDays" aria-label="Kun" /><button class="btn btn-secondary" @onclick="ExtendAsync" disabled="@busy">+ kun</button></div>
+                </div>
+                <div class="platform-action">
+                    @if (center.IsBlocked)
+                    {
+                        <strong>Kabinetni ochish</strong>
+                        <span class="muted">Blokdan chiqarilgach, muddat bo‘lsa markaz darhol ishlaydi.</span>
+                        <div class="platform-inline"><button class="btn btn-primary" @onclick="() => BlockAsync(false)" disabled="@busy">Blokdan chiqarish</button></div>
+                    }
+                    else
+                    {
+                        <strong>Kabinetni bloklash</strong>
+                        <span class="muted">Ma’lumotlar o‘chmaydi, faqat kirish yopiladi.</span>
+                        <div class="platform-inline"><input class="form-control" @bind="blockReason" placeholder="Sabab (markazga ko‘rinadi)" aria-label="Bloklash sababi" /><button class="btn btn-secondary danger-text" @onclick="() => BlockAsync(true)" disabled="@busy">Bloklash</button></div>
+                    }
+                </div>
+                <div class="platform-action">
+                    <strong>Rahbar parolini tiklash</strong>
+                    <span class="muted">Rahbar parolni unutgan bo‘lsa, yangisini bering.</span>
+                    <div class="platform-inline"><input class="form-control" @bind="newPassword" placeholder="Yangi parol" autocomplete="new-password" aria-label="Yangi parol" /><button class="btn btn-secondary" @onclick="ResetPasswordAsync" disabled="@busy">Tiklash</button></div>
+                </div>
+                <div class="platform-action platform-danger">
+                    <strong>Markazni butunlay o‘chirish</strong>
+                    <span class="muted">Barcha o‘quvchi, to‘lov, xodim va akkauntlar o‘chadi. Qaytarib bo‘lmaydi. Obuna to‘lovlari tarixi saqlanadi.</span>
+                    @if (confirmDelete)
+                    {
+                        <div class="platform-inline"><input class="form-control" @bind="deleteName" @bind:event="oninput" placeholder="@center.Name" aria-label="Tasdiqlash uchun markaz nomi" /><button class="btn btn-danger" @onclick="DeleteAsync" disabled="@(busy || deleteName.Trim() != center.Name.Trim())">O‘chirish</button><button class="btn btn-secondary" @onclick="() => confirmDelete = false">Bekor</button></div>
+                        <small class="muted">Tasdiqlash uchun markaz nomini aynan yozing: <strong>@center.Name</strong></small>
+                    }
+                    else
+                    {
+                        <div class="platform-inline"><button class="btn btn-secondary danger-text" @onclick="() => { confirmDelete = true; deleteName = string.Empty; }">O‘chirish…</button></div>
+                    }
+                </div>
+            </div>
+        </section>
+
+        <div class="workspace-grid branch-grid">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">TO‘LOVLAR</p><h2>Obuna to‘lovlari tarixi</h2></div></div>
+                @if (detail.Payments.Count == 0)
+                {
+                    <p class="muted">Hali to‘lov yo‘q.</p>
+                }
+                else
+                {
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>SANA</th><th>SUMMA</th><th>DAVR</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var payment in detail.Payments)
+                                {
+                                    <tr>
+                                        <td>@payment.PaidAtUtc.ToLocalTime().ToString("dd.MM.yyyy")<br /><span class="muted">@MethodName(payment.Method)@(payment.Note.Length > 0 ? $" · {payment.Note}" : "")</span></td>
+                                        <td><strong>@PlatformHome.Money(payment.Amount)</strong></td>
+                                        <td>@payment.Months oy<br /><span class="muted">@payment.PeriodStartUtc.ToLocalTime().ToString("dd.MM.yyyy") – @payment.PeriodEndUtc.ToLocalTime().ToString("dd.MM.yyyy")</span></td>
+                                        <td>
+                                            @if (payment.Id == detail.Payments[0].Id)
+                                            {
+                                                @if (confirmCancelId == payment.Id)
+                                                {
+                                                    <span class="chat-confirm">Bekor qilinsinmi? <button class="btn-link danger" @onclick="() => CancelPaymentAsync(payment.Id)">Ha</button> <button class="btn-link" @onclick="() => confirmCancelId = null">Yo‘q</button></span>
+                                                }
+                                                else
+                                                {
+                                                    <button class="btn-link" @onclick="() => confirmCancelId = payment.Id">Bekor qilish</button>
+                                                }
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">AKKAUNTLAR</p><h2>Markaz xodimlari (@detail.Members.Count)</h2></div></div>
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead><tr><th>XODIM</th><th>ROL</th><th>HOLAT</th></tr></thead>
+                        <tbody>
+                            @foreach (var member in detail.Members)
+                            {
+                                <tr>
+                                    <td>@member.FullName<br /><span class="muted">@LoginText(member.Login)</span></td>
+                                    <td>@CenterRoles.Label(member.Role)</td>
+                                    <td><span class="status-badge @(member.IsActive ? "status-active" : "status-muted")">@(member.IsActive ? "Faol" : "O‘chirilgan")</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <section class="panel platform-center-report">
+            <div class="panel-heading"><div><p class="eyebrow">MARKAZ HISOBOTI</p><h2>Moliya, o‘quvchilar va davomat</h2></div></div>
+            <div class="filter-bar expense-filters">
+                <div><label class="field-label" for="platform-start">Boshlanish sanasi</label><input @bind="startDate" id="platform-start" type="date" class="form-control" /></div>
+                <div><label class="field-label" for="platform-end">Tugash sanasi</label><input @bind="endDate" id="platform-end" type="date" class="form-control" /></div>
+                <div>
+                    <label class="field-label" for="platform-branch">Filial</label>
+                    <select @bind="selectedBranchId" id="platform-branch" class="form-select">
+                        <option value="">Barcha filiallar</option>
+                        @foreach (var branch in branches)
+                        {
+                            <option value="@branch.Id">@branch.Name</option>
+                        }
+                    </select>
+                </div>
+                <button type="button" class="btn btn-primary" @onclick="LoadReport">Hisobotni ko‘rish</button>
+            </div>
+            @if (report is not null)
+            {
+                    <div class="metric-grid platform-metrics">
+                        <article class="metric-card"><span class="metric-label">Filiallar</span><strong>@report.BranchCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">O‘quvchilar</span><strong>@report.StudentCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">Faol o‘quvchilar</span><strong>@report.ActiveStudentCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">Sinovdagilar</span><strong>@report.TrialStudentCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">Muzlatilganlar</span><strong>@report.FrozenStudentCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">Ketganlar</span><strong>@report.LeftStudentCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">Faol guruhlar</span><strong>@report.ActiveGroupCount</strong></article>
+                        <article class="metric-card"><span class="metric-label">Davomat</span><strong>@AttendanceRate.ToString("N0")%</strong><span class="metric-caption">@report.AttendedCount / @report.AttendanceCount qayd</span></article>
+                    </div>
+                    <div class="metric-grid finance-metrics">
+                        <article class="metric-card"><span class="metric-label">Jami daromad</span><strong>@report.IncomeTotal.ToString("N0")</strong><span class="metric-caption">so‘m · tanlangan davr</span></article>
+                        <article class="metric-card"><span class="metric-label">Jami xarajat</span><strong>@report.ExpenseTotal.ToString("N0")</strong><span class="metric-caption">so‘m · tanlangan davr</span></article>
+                        <article class="metric-card"><span class="metric-label">Davr qoldig‘i</span><strong>@((report.IncomeTotal - report.ExpenseTotal).ToString("N0"))</strong><span class="metric-caption">so‘m · daromad minus xarajat</span></article>
+                    </div>
+
+                    <div class="workspace-grid branch-grid">
+                        <section class="panel">
+                            <div class="panel-heading"><div><p class="eyebrow">KUNLIK MOLIYA</p><h3>Kunlar bo‘yicha</h3></div></div>
+                            @if (report.DailyTotals.Count == 0)
+                            {
+                                <p class="muted">Tanlangan davrda moliyaviy qaydlar yo‘q.</p>
+                            }
+                            else
+                            {
+                                <div class="table-panel">
+                                    <table class="data-table">
+                                        <thead><tr><th>SANA</th><th>DAROMAD</th><th>XARAJAT</th><th>QOLDIQ</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var day in report.DailyTotals)
+                                            {
+                                                <tr><td>@day.Date.ToString("dd.MM.yyyy")</td><td>@day.Income.ToString("N0") so‘m</td><td>@day.Expense.ToString("N0") so‘m</td><td><strong>@((day.Income - day.Expense).ToString("N0")) so‘m</strong></td></tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </section>
+                        <section class="panel">
+                            <div class="panel-heading"><div><p class="eyebrow">KATEGORIYALAR</p><h3>Daromad va xarajat turlari</h3></div></div>
+                            @if (report.CategoryTotals.Count == 0)
+                            {
+                                <p class="muted">Tanlangan davrda qayd yo‘q.</p>
+                            }
+                            else
+                            {
+                                <div class="table-panel">
+                                    <table class="data-table">
+                                        <thead><tr><th>TURI</th><th>KATEGORIYA</th><th>QAYD</th><th>JAMI</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var item in report.CategoryTotals)
+                                            {
+                                                <tr><td>@TypeName(item.Type)</td><td>@item.Category</td><td>@item.Count</td><td>@item.Amount.ToString("N0") so‘m</td></tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </section>
+                    </div>
+
+                    <section class="panel history-panel">
+                        <div class="panel-heading"><div><p class="eyebrow">TO‘LOV TAQSIMOTI</p><h3>To‘lov usullari bo‘yicha</h3></div></div>
+                        @if (report.PaymentTotals.Count == 0)
+                        {
+                            <p class="muted">Tanlangan davrda to‘lov qaydlari yo‘q.</p>
+                        }
+                        else
+                        {
+                            <div class="table-panel">
+                                <table class="data-table">
+                                    <thead><tr><th>TURI</th><th>TO‘LOV USULI</th><th>QAYD</th><th>JAMI</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var item in report.PaymentTotals)
+                                        {
+                                            <tr><td>@TypeName(item.Type)</td><td>@PaymentMethodName(item.Method)</td><td>@item.Count</td><td>@item.Amount.ToString("N0") so‘m</td></tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </section>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "yaratildi")]
+    private int? CreatedQuery { get; set; }
+
+    private PlatformCenterDetail? detail;
+    private IReadOnlyList<PlatformBranchOption> branches = [];
+    private PlatformCenterReport? report;
+    private string? error;
+    private string? notice;
+    private bool busy;
+
+    private int payMonths = 1;
+    private decimal payAmount;
+    private PaymentMethod payMethod = PaymentMethod.Cash;
+    private string payNote = "";
+    private string editName = "";
+    private decimal editFee;
+    private string editNote = "";
+    private int trialDays = 7;
+    private string blockReason = "";
+    private string newPassword = "";
+    private bool confirmDelete;
+    private string deleteName = "";
+    private int? confirmCancelId;
+
+    private DateOnly startDate = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly endDate = DateOnly.FromDateTime(DateTime.Today);
+    private int? selectedBranchId;
+
+    private decimal AttendanceRate => report is null || report.AttendanceCount == 0
+        ? 0
+        : (decimal)report.AttendedCount / report.AttendanceCount * 100;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CreatedQuery == 1)
+        {
+            notice = "Markaz yaratildi. Rahbar telefon raqami va parol bilan markaz kabinetiga kira oladi.";
+        }
+
+        await LoadAsync(resetForms: true);
+        if (detail is not null)
+        {
+            try
+            {
+                branches = await Platform.GetCenterBranchesAsync(Id);
+                await LoadReport();
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+            {
+                error = exception.Message;
+            }
+        }
+    }
+
+    private async Task LoadAsync(bool resetForms = false)
+    {
+        try
+        {
+            detail = await Platform.GetCenterAsync(Id);
+            if (resetForms)
+            {
+                editName = detail.Center.Name;
+                editFee = Math.Round(detail.Center.MonthlyFee);
+                editNote = detail.PlatformNote;
+                SuggestAmount();
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            detail = null;
+            error = exception.Message;
+        }
+    }
+
+    private void SuggestAmount() => payAmount = Math.Round((detail?.Center.MonthlyFee ?? 0) * Math.Max(1, payMonths));
+
+    // Har bir amal bir xil tartibda: bajarish, xabar, ma'lumotni qayta o'qish.
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        busy = true;
+        error = null;
+        notice = null;
+        try
+        {
+            await action();
+            if (success.Length > 0) notice = success;
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private Task PayAsync() => RunAsync(async () =>
+    {
+        var payment = await Platform.RecordPaymentAsync(Id, payAmount, payMonths, payMethod, payNote);
+        payNote = "";
+        notice = $"{PlatformHome.Money(payment.Amount)} qabul qilindi. Muddat {payment.PeriodEndUtc.ToLocalTime():dd.MM.yyyy} gacha uzaydi.";
+    }, "");
+
+    private Task SaveSettingsAsync() => RunAsync(() => Platform.UpdateCenterAsync(Id, editName, editFee, editNote), "Saqlandi.");
+
+    private Task ExtendAsync() => RunAsync(() => Platform.ExtendTrialAsync(Id, trialDays), $"Bepul muddat {trialDays} kunga uzaytirildi.");
+
+    private Task BlockAsync(bool blocked) => RunAsync(async () =>
+    {
+        await Platform.SetBlockedAsync(Id, blocked, blockReason);
+        blockReason = "";
+    }, blocked ? "Kabinet bloklandi." : "Kabinet ochildi.");
+
+    private Task ResetPasswordAsync() => RunAsync(async () =>
+    {
+        await Platform.ResetOwnerPasswordAsync(Id, newPassword);
+        newPassword = "";
+    }, "Rahbarning paroli yangilandi. Yangi parolni unga yetkazing.");
+
+    private Task CancelPaymentAsync(int paymentId) => RunAsync(async () =>
+    {
+        confirmCancelId = null;
+        await Platform.CancelLastPaymentAsync(Id, paymentId);
+    }, "To‘lov bekor qilindi, muddat oldingi holatiga qaytdi.");
+
+    private async Task DeleteAsync()
+    {
+        busy = true;
+        try
+        {
+            await Platform.DeleteCenterAsync(Id, deleteName);
+            Navigation.NavigateTo("/platforma/markazlar");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            error = exception.Message;
+            busy = false;
+        }
+    }
+
+    private async Task LoadReport()
+    {
+        try
+        {
+            report = await Platform.GetCenterReportAsync(Id, startDate, endDate, selectedBranchId);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            report = null;
+            error = exception.Message;
+        }
+    }
+
+    private static string LoginText(string login) =>
+        login.Length == 12 && login.All(char.IsDigit) ? $"+{login[..3]} {login[3..5]} {login[5..8]} {login[8..10]} {login[10..]}" : login;
+
+    private static string TypeName(FinancialTransactionType type) =>
+        type == FinancialTransactionType.Income ? "Daromad" : "Xarajat";
+
+    private static string MethodName(PaymentMethod method) => method switch
+    {
+        PaymentMethod.Cash => "Naqd",
+        PaymentMethod.Card => "Karta",
+        PaymentMethod.Terminal => "Terminal",
+        PaymentMethod.BankTransfer => "Bank o‘tkazmasi",
+        _ => method.ToString()
+    };
+
+    private static string PaymentMethodName(PaymentMethod method) => MethodName(method);
+}

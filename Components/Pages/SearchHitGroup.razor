@@ -1,0 +1,16 @@
+@* Qidiruv natijalari guruhi (sarlavha + topilganlar). Bo'sh bo'lsa hech narsa chiqarmaydi. *@
+@if (Hits.Count > 0)
+{
+    <div class="search-group">
+        <h2>@Title · @Hits.Count</h2>
+        @foreach (var hit in Hits)
+        {
+            <a class="search-hit" href="@hit.Href"><strong>@hit.Title</strong><small>@hit.Subtitle</small></a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<SearchHit> Hits { get; set; } = [];
+}

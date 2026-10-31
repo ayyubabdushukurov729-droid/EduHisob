@@ -1,0 +1,105 @@
+@page "/platforma/kirish"
+@layout EduHisob.Components.Layout.LandingLayout
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Identity
+@using EduHisob.Data
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject ILogger<PlatformLogin> Logger
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Platforma — EduHisob</PageTitle>
+
+@* Platforma egasi uchun alohida kirish: markaz xodimlari bu yerdan kira olmaydi. *@
+<main class="auth-page platform-auth">
+    <section class="auth-card">
+        <a class="brand auth-brand" href="/"><span class="brand-mark">E</span><span>EduHisob</span></a>
+        <p class="eyebrow">PLATFORMA BOSHQARUVI</p>
+        <h1>Platforma egasi kabineti</h1>
+        <p class="muted">Barcha markazlar, ularning hisobotlari va obuna to‘lovlari.</p>
+        <StatusMessage Message="@errorMessage" />
+        <EditForm EditContext="editContext" method="post" OnSubmit="LoginUser" FormName="platform-login">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="validation-summary" role="alert" />
+            <label class="field-label" for="platform-login">Telefon raqam</label>
+            <InputText @bind-Value="Input.Login" id="platform-login" class="form-control" autocomplete="username" aria-required="true" placeholder="+998 90 000 00 00" />
+            <label class="field-label" for="platform-password">Parol</label>
+            <InputText type="password" @bind-Value="Input.Password" id="platform-password" class="form-control" autocomplete="current-password" aria-required="true" />
+            <div class="form-check mt-3">
+                <InputCheckbox @bind-Value="Input.RememberMe" id="platform-remember" class="form-check-input" />
+                <label for="platform-remember" class="form-check-label muted">Meni eslab qol</label>
+            </div>
+            <button type="submit" class="btn btn-primary auth-submit">Kirish</button>
+        </EditForm>
+        <a class="auth-link" href="Account/Login">Markaz kabinetiga kirish</a>
+    </section>
+</main>
+
+@code {
+    private string? errorMessage;
+    private EditContext editContext = default!;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        editContext = new EditContext(Input);
+
+        if (HttpMethods.IsGet(HttpContext.Request.Method))
+        {
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+        }
+    }
+
+    public async Task LoginUser()
+    {
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        // Markaz akkaunti bilan ham "noto'g'ri" deyiladi: bu sahifa qaysi raqamlar mavjudligini oshkor qilmaydi.
+        var login = TeamAccessService.PhoneLogin(Input.Login) ?? Input.Login.Trim();
+        var user = await UserManager.FindByNameAsync(login);
+        if (user is null || !user.IsPlatformAdmin)
+        {
+            errorMessage = "Login yoki parol noto‘g‘ri.";
+            return;
+        }
+
+        var result = await SignInManager.PasswordSignInAsync(user, Input.Password, Input.RememberMe, lockoutOnFailure: true);
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("Platform owner logged in.");
+            RedirectManager.RedirectTo("/platforma");
+        }
+        else if (result.IsLockedOut)
+        {
+            errorMessage = "Ko‘p marta noto‘g‘ri parol kiritildi. Birozdan keyin qayta urinib ko‘ring.";
+        }
+        else
+        {
+            errorMessage = "Login yoki parol noto‘g‘ri.";
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Telefon raqamni kiriting.")]
+        public string Login { get; set; } = "";
+
+        [Required(ErrorMessage = "Parolni kiriting.")]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        public bool RememberMe { get; set; }
+    }
+}

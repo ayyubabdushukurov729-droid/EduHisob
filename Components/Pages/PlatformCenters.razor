@@ -1,0 +1,187 @@
+@page "/platforma/markazlar"
+@layout PlatformLayout
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = PlatformAdminDataService.Policy)]
+@using System.ComponentModel.DataAnnotations
+@inject PlatformAdminDataService Platform
+@inject NavigationManager Navigation
+
+<PageTitle>Markazlar — Platforma</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">PLATFORMA</p>
+            <h1>Markazlar</h1>
+            <p class="muted">Barcha mijoz markazlar: obuna holati, to‘lovlar va foydalanish ko‘rsatkichlari.</p>
+        </div>
+        <button class="btn btn-primary" @onclick="() => showForm = !showForm">@(showForm ? "Yopish" : "+ Markaz qo‘shish")</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+
+    @if (showForm)
+    {
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">YANGI MARKAZ</p><h2>Markaz va rahbar akkaunti</h2><p class="muted">Rahbar shu telefon raqami va parol bilan markaz kabinetiga kiradi. Asosiy filial avtomatik ochiladi.</p></div></div>
+            <EditForm Model="input" OnValidSubmit="CreateAsync" FormName="platform-new-center">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="validation-summary" />
+                <div class="platform-form-grid">
+                    <div><label class="field-label" for="nc-name">Markaz nomi</label><InputText @bind-Value="input.CenterName" id="nc-name" class="form-control" placeholder="Masalan: Bilim plus" /></div>
+                    <div><label class="field-label" for="nc-owner">Rahbar ism-familiyasi</label><InputText @bind-Value="input.OwnerName" id="nc-owner" class="form-control" placeholder="Aliyev Vali" /></div>
+                    <div><label class="field-label" for="nc-phone">Telefon (login)</label><InputText @bind-Value="input.OwnerPhone" id="nc-phone" class="form-control" placeholder="+998 90 123 45 67" /></div>
+                    <div><label class="field-label" for="nc-password">Parol</label><InputText @bind-Value="input.Password" id="nc-password" class="form-control" placeholder="kamida 8 belgi, 1 raqam" autocomplete="new-password" /></div>
+                    <div><label class="field-label" for="nc-trial">Bepul sinov (kun)</label><InputNumber @bind-Value="input.TrialDays" id="nc-trial" class="form-control" /></div>
+                    <div><label class="field-label" for="nc-fee">Oylik to‘lov (so‘m)</label><InputNumber @bind-Value="input.MonthlyFee" id="nc-fee" class="form-control" /></div>
+                </div>
+                <div class="form-actions"><button type="submit" class="btn btn-primary" disabled="@busy">Markazni yaratish</button></div>
+            </EditForm>
+        </section>
+    }
+
+    <div class="filter-bar">
+        <input class="form-control search-input" placeholder="Nomi, rahbar yoki telefon" @bind="search" @bind:event="oninput" @bind:after="LoadAsync" aria-label="Markaz qidirish" />
+        <select class="form-select" @bind="statusFilter" @bind:after="LoadAsync" aria-label="Holat">
+            <option value="">Barcha holatlar</option>
+            @foreach (var status in Enum.GetValues<CenterStatus>())
+            {
+                <option value="@status">@CenterStatuses.Label(status)</option>
+            }
+        </select>
+    </div>
+
+    @if (centers is null)
+    {
+        <div class="notice">Yuklanmoqda...</div>
+    }
+    else if (centers.Count == 0)
+    {
+        <div class="empty-state">
+            <span class="empty-icon">▦</span>
+            <h2>Markaz topilmadi</h2>
+            <p>Qidiruvni o‘zgartiring yoki yangi markaz qo‘shing.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-panel">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>MARKAZ</th>
+                        <th>RAHBAR</th>
+                        <th>HOLAT</th>
+                        <th>MUDDAT</th>
+                        <th>OYLIK TO‘LOV</th>
+                        <th>TO‘LAGAN</th>
+                        <th>O‘QUVCHI</th>
+                        <th>GURUH / XODIM</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var center in centers)
+                    {
+                        <tr>
+                            <td><a href="/platforma/markazlar/@center.Id"><strong>@center.Name</strong></a><br /><span class="muted">@center.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy") dan · @center.BranchCount filial</span></td>
+                            <td>@(center.OwnerName.Length > 0 ? center.OwnerName : "—")<br /><span class="muted">@center.OwnerPhone</span></td>
+                            <td><span class="status-badge @CenterStatuses.Css(center.Status)">@CenterStatuses.Label(center.Status)</span></td>
+                            <td>@center.AccessEndsAtUtc.ToLocalTime().ToString("dd.MM.yyyy")<br /><span class="muted">@DaysLeft(center)</span></td>
+                            <td>@(center.MonthlyFee > 0 ? PlatformHome.Money(center.MonthlyFee) : "—")</td>
+                            <td>@PlatformHome.Money(center.PaidTotal)</td>
+                            <td>@center.StudentCount<br /><span class="muted">@center.ActiveStudentCount faol</span></td>
+                            <td>@center.ActiveGroupCount / @center.UserCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="table-count">@centers.Count ta markaz</p>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "holat")]
+    private string? StatusQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "yangi")]
+    private int? NewQuery { get; set; }
+
+    private IReadOnlyList<CenterDirectoryEntry>? centers;
+    private readonly NewCenterModel input = new();
+    private string search = "";
+    private string statusFilter = "";
+    private bool showForm;
+    private bool busy;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        statusFilter = Enum.TryParse<CenterStatus>(StatusQuery, out var status) ? status.ToString() : "";
+        showForm = NewQuery == 1;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            centers = await Platform.GetCentersAsync(search, Enum.TryParse<CenterStatus>(statusFilter, out var status) ? status : null);
+            error = null;
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            error = exception.Message;
+            centers = [];
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        busy = true;
+        try
+        {
+            var id = await Platform.CreateCenterAsync(new NewCenterInput(input.CenterName, input.OwnerName, input.OwnerPhone, input.Password, input.TrialDays, input.MonthlyFee));
+            Navigation.NavigateTo($"/platforma/markazlar/{id}?yaratildi=1");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    internal static string DaysLeft(CenterDirectoryEntry center)
+    {
+        if (center.IsBlocked) return "bloklangan";
+        var days = (int)Math.Ceiling((center.AccessEndsAtUtc - DateTime.UtcNow).TotalDays);
+        return days > 0 ? $"{days} kun qoldi" : days == 0 ? "bugun tugaydi" : $"{-days} kun o‘tdi";
+    }
+
+    private sealed class NewCenterModel
+    {
+        [Required(ErrorMessage = "Markaz nomini kiriting.")]
+        public string CenterName { get; set; } = "";
+
+        [Required(ErrorMessage = "Rahbar ism-familiyasini kiriting.")]
+        public string OwnerName { get; set; } = "";
+
+        [Required(ErrorMessage = "Telefon raqamini kiriting.")]
+        public string OwnerPhone { get; set; } = "";
+
+        [Required(ErrorMessage = "Parolni kiriting.")]
+        public string Password { get; set; } = "";
+
+        [Range(0, 365, ErrorMessage = "Sinov muddati 0–365 kun.")]
+        public int TrialDays { get; set; } = 14;
+
+        [Range(typeof(decimal), "0", "1000000000", ErrorMessage = "Oylik to‘lov manfiy bo‘lmasin.")]
+        public decimal MonthlyFee { get; set; } = 300_000;
+    }
+}

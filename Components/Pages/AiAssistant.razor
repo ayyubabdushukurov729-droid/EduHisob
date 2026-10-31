@@ -1,0 +1,299 @@
+@page "/yordamchi"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using EduHisob.Data.Assistant
+@inject LocalAgent Agent
+@inject AssistantHistoryService History
+@inject IJSRuntime JS
+
+<PageTitle>Yordamchi — EduHisob</PageTitle>
+
+<section class="workspace assistant-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">YORDAMCHI</p><h1>Markaz yordamchisi</h1><p class="muted">Oddiy so‘z bilan yozing: hisobot, o‘quvchi qo‘shish, to‘lov, xodim, lid. Suhbatlaringiz saqlanadi — ularni faqat siz ko‘rasiz va istalgan vaqtda o‘chira olasiz.</p></div>
+        <button class="btn btn-primary" @onclick="NewChat" disabled="@busy">+ Yangi suhbat</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(notice))
+    {
+        <div class="notice notice-success" role="status">@notice</div>
+    }
+
+    <div class="assistant-layout">
+        <aside class="chat-history">
+            <div class="chat-history-head">
+                <strong>Suhbatlar</strong>
+                @if (conversations.Count > 0)
+                {
+                    @if (confirmDeleteAll)
+                    {
+                        <span class="chat-confirm">Hammasi o‘chsinmi? <button class="btn-link danger" @onclick="DeleteAll">Ha</button> <button class="btn-link" @onclick="() => confirmDeleteAll = false">Yo‘q</button></span>
+                    }
+                    else
+                    {
+                        <button class="btn-link" @onclick="() => confirmDeleteAll = true" disabled="@busy">Hammasini o‘chirish</button>
+                    }
+                }
+            </div>
+            @if (conversations.Count == 0)
+            {
+                <p class="muted chat-history-empty">Hali suhbat yo‘q. Savol yozsangiz, shu yerda saqlanadi.</p>
+            }
+            @foreach (var conversation in conversations)
+            {
+                <div class="chat-history-item @(conversation.Id == conversationId ? "active" : "")">
+                    @if (confirmDeleteId == conversation.Id)
+                    {
+                        <span class="chat-confirm">O‘chirilsinmi? <button class="btn-link danger" @onclick="() => Delete(conversation.Id)">Ha</button> <button class="btn-link" @onclick="() => confirmDeleteId = null">Yo‘q</button></span>
+                    }
+                    else
+                    {
+                        <button class="chat-history-open" @onclick="() => Open(conversation.Id)" disabled="@busy">
+                            <span>@conversation.Title</span>
+                            <small>@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @(conversation.MessageCount / 2) ta savol</small>
+                        </button>
+                        <button class="chat-history-delete" title="Suhbatni o‘chirish" aria-label="Suhbatni o‘chirish" @onclick="() => confirmDeleteId = conversation.Id" disabled="@busy">×</button>
+                    }
+                </div>
+            }
+        </aside>
+
+        <div class="chat-panel">
+            <div class="chat-log" id="chat-log">
+                @if (messages.Count == 0)
+                {
+                    <div class="chat-welcome">
+                        <span class="chat-welcome-mark">✦</span>
+                        <h2>Nima qilamiz?</h2>
+                        <p class="muted">Masalan, quyidagilardan birini bosing yoki o‘zingiz yozing.</p>
+                        <div class="chat-suggestions">
+                            @foreach (var example in Examples)
+                            {
+                                <button type="button" class="chat-chip" @onclick="() => Send(example)">@example</button>
+                            }
+                        </div>
+                    </div>
+                }
+                @foreach (var message in messages)
+                {
+                    <div class="chat-msg @(message.FromUser ? "chat-user" : "chat-bot") @(message.IsError ? "chat-error" : "")">
+                        @if (!message.FromUser)
+                        {
+                            <span class="chat-avatar">✦</span>
+                        }
+                        <div class="chat-bubble">
+                            @if (message.Steps.Count > 0)
+                            {
+                                <div class="chat-steps">
+                                    @foreach (var step in message.Steps)
+                                    {
+                                        <span class="chat-step @(step.IsError ? "chat-step-error" : "")">@(step.IsError ? "Bajarilmadi · " : "")@StepLabel(step.ToolName)</span>
+                                    }
+                                </div>
+                            }
+                            @if (message.FromUser)
+                            {
+                                @message.Text
+                            }
+                            else
+                            {
+                                @((MarkupString)ChatMarkdown.ToHtml(message.Text))
+                            }
+                        </div>
+                    </div>
+                }
+                @if (busy)
+                {
+                    <div class="chat-msg chat-bot">
+                        <span class="chat-avatar">✦</span>
+                        <div class="chat-bubble">
+                            <span class="chat-typing"><i></i><i></i><i></i></span>
+                        </div>
+                    </div>
+                }
+            </div>
+            <form class="chat-input" @onsubmit="SubmitAsync" @onsubmit:preventDefault>
+                <input type="text" @bind="draft" @bind:event="oninput" placeholder="Masalan: o‘tgan oy hisobotini ber" disabled="@busy" aria-label="Xabar" autocomplete="off" />
+                <button class="btn btn-primary" type="submit" disabled="@(busy || string.IsNullOrWhiteSpace(draft))">Yuborish</button>
+            </form>
+        </div>
+    </div>
+</section>
+
+@code {
+    private static readonly string[] Examples =
+    [
+        "O‘tgan oy hisobotini ber",
+        "Qarzdorlar ro‘yxati va eng katta qarzlar",
+        "Bu oy ish haqi qancha?",
+        "Bugungi darslar",
+        "Bugun nechta to‘lov tushdi?",
+        "Qanday chegirma beraman?"
+    ];
+
+    private readonly List<ChatMessage> messages = [];
+    private IReadOnlyList<ConversationSummary> conversations = [];
+    private int? conversationId;
+    private int? confirmDeleteId;
+    private bool confirmDeleteAll;
+    private string draft = "";
+    private string? notice;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await LoadListAsync();
+
+    private async Task LoadListAsync()
+    {
+        try
+        {
+            conversations = await History.ListAsync();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            conversations = [];
+        }
+    }
+
+    private Task SubmitAsync() => Send(draft);
+
+    private async Task Send(string text)
+    {
+        text = text.Trim();
+        if (busy || text.Length == 0) return;
+
+        busy = true;
+        draft = "";
+        notice = null;
+        messages.Add(new ChatMessage(text, true));
+        await ScrollDown();
+        ChatMessage answer;
+        try
+        {
+            var reply = await Agent.SendAsync(text);
+            answer = new ChatMessage(reply.Text.Length > 0 ? reply.Text : "Bajarildi.", false, reply.Steps);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            answer = new ChatMessage(exception.Message, false, IsError: true);
+        }
+        messages.Add(answer);
+
+        try
+        {
+            // Saqlashda xato bo'lsa ham suhbat ekranda davom etadi.
+            conversationId = await History.SaveExchangeAsync(conversationId, text, answer.Text, answer.IsError, answer.Steps);
+            await LoadListAsync();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            notice = "Suhbatni saqlab bo‘lmadi, lekin yordamchi ishlashda davom etadi.";
+        }
+        finally
+        {
+            busy = false;
+        }
+        await ScrollDown();
+    }
+
+    private void NewChat()
+    {
+        Agent.Reset();
+        messages.Clear();
+        conversationId = null;
+        notice = null;
+    }
+
+    private async Task Open(int id)
+    {
+        try
+        {
+            var saved = await History.LoadAsync(id);
+            Agent.Reset();
+            messages.Clear();
+            messages.AddRange(saved.Select(m => new ChatMessage(m.Text, m.FromUser, m.Steps, m.IsError)));
+            conversationId = id;
+            notice = null;
+            await ScrollDown();
+        }
+        catch (InvalidOperationException exception)
+        {
+            notice = exception.Message;
+            await LoadListAsync();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        confirmDeleteId = null;
+        try
+        {
+            await History.DeleteAsync(id);
+            if (conversationId == id) NewChat();
+            notice = "Suhbat o‘chirildi.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            notice = exception.Message;
+        }
+        await LoadListAsync();
+    }
+
+    private async Task DeleteAll()
+    {
+        confirmDeleteAll = false;
+        var count = await History.DeleteAllAsync();
+        NewChat();
+        notice = $"{count} ta suhbat o‘chirildi.";
+        await LoadListAsync();
+    }
+
+    private async Task ScrollDown()
+    {
+        StateHasChanged();
+        try { await JS.InvokeVoidAsync("eval", "setTimeout(()=>{const l=document.getElementById('chat-log');if(l)l.scrollTop=l.scrollHeight;},30)"); }
+        catch (JSDisconnectedException) { }
+    }
+
+    private static string StepLabel(string tool) => tool switch
+    {
+        "get_overview" => "Ko‘rsatkichlar olindi",
+        "cash" => "Kassa ko‘rildi",
+        "attendance" => "Davomat hisoblandi",
+        "funnel" => "Lidlar tahlili",
+        "left_students" => "Ketganlar ko‘rildi",
+        "get_month_report" => "Oylik hisobot tuzildi",
+        "search" => "Qidirildi",
+        "list_students" => "O‘quvchilar ko‘rildi",
+        "get_student" => "Profil ochildi",
+        "add_student" => "O‘quvchi qo‘shildi",
+        "update_student" => "O‘quvchi yangilandi",
+        "enroll_student" => "Guruhga yozildi",
+        "leave_group" => "Guruhdan chiqarish",
+        "freeze_student" => "Muzlatish",
+        "add_student_note" => "Izoh yozildi",
+        "accept_payment" => "To‘lov qabul qilindi",
+        "list_groups" => "Guruhlar ko‘rildi",
+        "get_group" => "Guruh ochildi",
+        "create_group" => "Guruh ochildi",
+        "list_reference_data" => "Filial va kurslar",
+        "add_course" => "Kurs qo‘shildi",
+        "list_debtors" => "Qarzdorlar ko‘rildi",
+        "list_transactions" => "Moliya amallari",
+        "add_expense" => "Xarajat yozildi",
+        "list_employees" => "Xodimlar ko‘rildi",
+        "add_employee" => "Xodim qo‘shildi",
+        "update_employee" => "Xodim yangilandi",
+        "get_payroll" => "Ish haqi hisoblandi",
+        "add_payroll_entry" => "Ish haqi qaydi",
+        "list_leads" => "Lidlar ko‘rildi",
+        "add_lead" => "Lid qo‘shildi",
+        "move_lead" => "Lid bosqichi",
+        "convert_lead" => "Liddan o‘quvchi",
+        _ => tool
+    };
+
+    private sealed record ChatMessage(string Text, bool FromUser, IReadOnlyList<AssistantStep>? StepList = null, bool IsError = false)
+    {
+        public IReadOnlyList<AssistantStep> Steps => StepList ?? [];
+    }
+}

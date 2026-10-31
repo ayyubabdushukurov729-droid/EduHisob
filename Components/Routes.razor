@@ -1,0 +1,25 @@
+﻿@using EduHisob.Components.Account.Shared
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @if (context.User.Identity?.IsAuthenticated == true)
+                {
+                    <section class="workspace">
+                        <div class="empty-state">
+                            <span class="empty-icon">⊘</span>
+                            <h2>Bu sahifaga ruxsatingiz yo‘q</h2>
+                            <p>Rolingiz bu bo‘limni ochishga ruxsat bermaydi. Agar rolingiz yaqinda o‘zgargan bo‘lsa, tizimdan chiqib qayta kiring.</p>
+                            <a class="btn btn-primary" href="/boshqaruv">Bosh sahifaga qaytish</a>
+                        </div>
+                    </section>
+                }
+                else
+                {
+                    <RedirectToLogin />
+                }
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

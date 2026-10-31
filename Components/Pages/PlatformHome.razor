@@ -1,0 +1,157 @@
+@page "/platforma"
+@layout PlatformLayout
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = PlatformAdminDataService.Policy)]
+@inject PlatformAdminDataService Platform
+
+<PageTitle>Platforma — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">PLATFORMA</p>
+            <h1>Umumiy ko‘rinish</h1>
+            <p class="muted">Barcha markazlar, obuna tushumi va e’tibor talab qiladigan mijozlar.</p>
+        </div>
+        <a class="btn btn-primary" href="/platforma/markazlar?yangi=1">+ Markaz qo‘shish</a>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="notice notice-error" role="alert">@error</div>
+    }
+    else if (data is null)
+    {
+        <div class="notice">Yuklanmoqda...</div>
+    }
+    else
+    {
+        <div class="metric-grid finance-metrics">
+            <article class="metric-card">
+                <span class="metric-label">Bu oy tushum</span>
+                <strong>@Money(data.RevenueThisMonth)</strong>
+                <span class="metric-caption">@Trend() · o‘tgan oy @Money(data.RevenueLastMonth)</span>
+            </article>
+            <article class="metric-card">
+                <span class="metric-label">Oylik kutilayotgan tushum</span>
+                <strong>@Money(data.ExpectedMonthly)</strong>
+                <span class="metric-caption">faol markazlarning oylik to‘lovi yig‘indisi</span>
+            </article>
+            <article class="metric-card">
+                <span class="metric-label">Jami tushum</span>
+                <strong>@Money(data.RevenueTotal)</strong>
+                <span class="metric-caption">platforma ochilganidan beri</span>
+            </article>
+        </div>
+
+        <div class="metric-grid platform-metrics">
+            <a class="metric-card metric-link" href="/platforma/markazlar"><span class="metric-label">Jami markazlar</span><strong>@data.CenterCount</strong><span class="metric-caption">bu oy +@data.NewCentersThisMonth yangi</span></a>
+            <a class="metric-card metric-link" href="/platforma/markazlar?holat=Paid"><span class="metric-label">To‘laganlar</span><strong>@data.PaidCount</strong><span class="metric-caption">obunasi faol</span></a>
+            <a class="metric-card metric-link" href="/platforma/markazlar?holat=Trial"><span class="metric-label">Sinovda</span><strong>@data.TrialCount</strong><span class="metric-caption">bepul muddatda</span></a>
+            <a class="metric-card metric-link" href="/platforma/markazlar?holat=Expiring"><span class="metric-label">Tugayapti</span><strong>@data.ExpiringCount</strong><span class="metric-caption">@CenterStatuses.ExpiringDays kun ichida</span></a>
+            <a class="metric-card metric-link" href="/platforma/markazlar?holat=Expired"><span class="metric-label">Muddati o‘tgan</span><strong>@data.ExpiredCount</strong><span class="metric-caption">kabineti yopiq</span></a>
+            <a class="metric-card metric-link" href="/platforma/markazlar?holat=Blocked"><span class="metric-label">Bloklangan</span><strong>@data.BlockedCount</strong><span class="metric-caption">qo‘lda yopilgan</span></a>
+            <article class="metric-card"><span class="metric-label">O‘quvchilar</span><strong>@data.StudentCount.ToString("N0")</strong><span class="metric-caption">@data.ActiveStudentCount.ToString("N0") faol · barcha markazlarda</span></article>
+            <article class="metric-card"><span class="metric-label">Markazlar tushumi</span><strong>@Money(data.CentersIncomeThisMonth)</strong><span class="metric-caption">bu oy o‘quvchilardan</span></article>
+        </div>
+
+        <div class="workspace-grid branch-grid">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">TUSHUM</p><h2>Oxirgi 6 oy</h2></div></div>
+                @{ var max = Math.Max(1m, data.Months.Max(month => month.Amount)); }
+                <div class="platform-bars">
+                    @foreach (var month in data.Months)
+                    {
+                        <div class="platform-bar-row">
+                            <span class="platform-bar-label">@MonthName(month.Month)</span>
+                            <span class="platform-bar-track"><span class="platform-bar-fill" style="width:@((month.Amount / max * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span></span>
+                            <span class="platform-bar-value">@Money(month.Amount)<small>@month.PaymentCount to‘lov · +@month.NewCenters markaz</small></span>
+                        </div>
+                    }
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">E’TIBOR</p><h2>Muddati tugayotgan va o‘tganlar</h2></div></div>
+                @if (data.NeedsAttention.Count == 0)
+                {
+                    <p class="muted">Hamma markazning muddati joyida.</p>
+                }
+                else
+                {
+                    <div class="table-panel">
+                        <table class="data-table">
+                            <thead><tr><th>MARKAZ</th><th>MUDDAT</th><th>HOLAT</th></tr></thead>
+                            <tbody>
+                                @foreach (var center in data.NeedsAttention)
+                                {
+                                    <tr>
+                                        <td><a href="/platforma/markazlar/@center.Id"><strong>@center.Name</strong></a><br /><span class="muted">@center.OwnerPhone</span></td>
+                                        <td>@center.AccessEndsAtUtc.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                        <td><span class="status-badge @CenterStatuses.Css(center.Status)">@CenterStatuses.Label(center.Status)</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        </div>
+
+        <section class="panel history-panel">
+            <div class="panel-heading"><div><p class="eyebrow">TO‘LOVLAR</p><h2>Oxirgi obuna to‘lovlari</h2></div><a class="btn btn-secondary" href="/platforma/tolovlar">Hammasi</a></div>
+            @if (data.RecentPayments.Count == 0)
+            {
+                <p class="muted">Hali to‘lov qabul qilinmagan. Markaz sahifasida “To‘lov qabul qilish” orqali yoziladi.</p>
+            }
+            else
+            {
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead><tr><th>SANA</th><th>MARKAZ</th><th>SUMMA</th><th>DAVR</th></tr></thead>
+                        <tbody>
+                            @foreach (var payment in data.RecentPayments)
+                            {
+                                <tr>
+                                    <td>@payment.PaidAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>@if (payment.CenterExists) { <a href="/platforma/markazlar/@payment.CenterId">@payment.CenterName</a> } else { <span class="muted">@payment.CenterName (o‘chirilgan)</span> }</td>
+                                    <td><strong>@Money(payment.Amount)</strong></td>
+                                    <td>@payment.Months oy · @payment.PeriodEndUtc.ToLocalTime().ToString("dd.MM.yyyy") gacha</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    private PlatformOverview? data;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            data = await Platform.GetOverviewAsync();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            error = exception.Message;
+        }
+    }
+
+    private string Trend()
+    {
+        if (data!.RevenueLastMonth == 0) return data.RevenueThisMonth > 0 ? "o‘sish" : "hali tushum yo‘q";
+        var change = (data.RevenueThisMonth - data.RevenueLastMonth) / data.RevenueLastMonth * 100;
+        return change >= 0 ? $"+{change:0}%" : $"{change:0}%";
+    }
+
+    internal static string Money(decimal amount) => EduHisob.Data.Assistant.UzbekText.Money(amount);
+
+    internal static string MonthName(DateOnly month) =>
+        EduHisob.Data.Assistant.UzbekText.MonthName(month);
+}

@@ -1,0 +1,46 @@
+@inherits LayoutComponentBase
+
+@* Platforma egasi kabineti: markazlar kabinetidan alohida menyu va rang. *@
+<div class="app-shell platform-shell">
+    <aside class="app-sidebar">
+        <div class="sidebar-brand">
+            <a class="brand" href="/platforma"><span class="brand-mark">E</span><span>EduHisob</span></a>
+            <span class="brand-caption">PLATFORMA BOSHQARUVI</span>
+        </div>
+        <AuthorizeView Policy="@PlatformAdminDataService.Policy">
+            <Authorized>
+                <div class="sidebar-center"><span class="center-avatar">@(Name(context.User).FirstOrDefault().ToString().ToUpperInvariant())</span><span><strong>@Name(context.User)</strong><small>Platforma egasi</small></span></div>
+                <nav class="side-nav" aria-label="Platforma menyusi">
+                    <span class="nav-section-label">BOSHQARUV</span>
+                    <NavLink href="/platforma" Match="NavLinkMatch.All" class="side-link"><span class="side-icon">⌂</span>Umumiy ko‘rinish</NavLink>
+                    <NavLink href="/platforma/markazlar" class="side-link"><span class="side-icon">▦</span>Markazlar</NavLink>
+                    <NavLink href="/platforma/tolovlar" class="side-link"><span class="side-icon">◈</span>Obuna to‘lovlari</NavLink>
+                </nav>
+                <div class="sidebar-bottom">
+                    <form action="Account/Logout" method="post">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ReturnUrl" value="platforma/kirish" />
+                        <button type="submit" class="side-link logout-link"><span class="side-icon">↪</span>Chiqish</button>
+                    </form>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </aside>
+    <main class="app-main">
+        <header class="app-topbar">
+            <a class="brand" href="/platforma"><span class="brand-mark small">E</span><span>Platforma</span></a>
+        </header>
+        <article class="app-content">@Body</article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Kutilmagan xatolik yuz berdi.
+    <a href="." class="reload">Sahifani yangilash</a>
+    <span class="dismiss" aria-label="Yopish">×</span>
+</div>
+
+@code {
+    private static string Name(System.Security.Claims.ClaimsPrincipal user) =>
+        user.FindFirst("full_name")?.Value is { Length: > 0 } name ? name : "Platforma";
+}

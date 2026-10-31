@@ -1,0 +1,155 @@
+@page "/chiqib-ketganlar"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CenterRoles.StudentDesk)]
+@using System.Globalization
+@inject StudentAccountService Accounts
+
+<PageTitle>Chiqib ketganlar — EduHisob</PageTitle>
+
+<section class="workspace">
+    <div class="page-heading">
+        <div><p class="eyebrow">O‘QUVCHILAR</p><h1>Chiqib ketganlar</h1><p class="muted">Guruhdan chiqqan o‘quvchilar va sabablari. Sabablar ro‘yxatini shu yerda boshqarasiz.</p></div>
+    </div>
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="notice @(isError ? "notice-error" : "notice-success")" role="status">@message</div>
+    }
+
+    <div class="filter-bar expense-filters">
+        <div><label class="field-label">Dan</label><input type="date" class="form-control" @bind="from" /></div>
+        <div><label class="field-label">Gacha</label><input type="date" class="form-control" @bind="to" /></div>
+        <div>
+            <label class="field-label">Sabab</label>
+            <select class="form-select" @bind="reasonFilter">
+                <option value="">Barcha sabablar</option>
+                @foreach (var reason in rows.Select(r => r.Reason).Distinct().Order()) { <option value="@reason">@reason</option> }
+            </select>
+        </div>
+        <button class="btn btn-secondary" @onclick="Load">Ko‘rsatish</button>
+    </div>
+
+    <div class="workspace-grid branch-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">RO‘YXAT</p><h2>@Visible.Count() ta chiqish</h2></div></div>
+            @if (!Visible.Any())
+            {
+                <p class="muted">Tanlangan davrda guruhdan chiqqanlar yo‘q.</p>
+            }
+            else
+            {
+                <div class="table-panel">
+                    <table class="data-table">
+                        <thead><tr><th>O‘QUVCHI</th><th>GURUH / USTOZ</th><th>SANA</th><th>SABAB</th></tr></thead>
+                        <tbody>
+                            @foreach (var row in Visible)
+                            {
+                                <tr>
+                                    <td><a class="text-link-strong" href="/oquvchilar/@row.StudentId">@row.StudentName</a><br /><span class="muted">@row.Phone</span></td>
+                                    <td>@row.GroupName<br /><span class="muted">@row.TeacherName</span></td>
+                                    <td>@row.LeftOn.ToString("dd.MM.yyyy")</td>
+                                    <td>@row.Reason@if (!string.IsNullOrEmpty(row.Note)) { <br /><span class="muted">@row.Note</span> }</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+        <div class="stack-gap">
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">TAHLIL</p><h2>Sabablar ulushi</h2></div></div>
+                @if (rows.Count == 0)
+                {
+                    <p class="muted">Ma’lumot yo‘q.</p>
+                }
+                else
+                {
+                    @foreach (var stat in rows.GroupBy(r => r.Reason).Select(g => new { Reason = g.Key, Count = g.Count() }).OrderByDescending(s => s.Count))
+                    {
+                        var percent = (double)stat.Count / rows.Count * 100;
+                        <div style="margin-bottom:10px">
+                            <div class="inline-actions" style="justify-content:space-between"><span>@stat.Reason</span><strong>@stat.Count (@percent.ToString("0")%)</strong></div>
+                            <div class="attendance-progress"><span style="width:@percent.ToString("0", CultureInfo.InvariantCulture)%"></span></div>
+                        </div>
+                    }
+                }
+            </section>
+            <AuthorizeView Roles="@CenterRoles.Management" Context="r">
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">SOZLAMA</p><h2>Chiqish sabablari</h2></div></div>
+                    <p class="muted">Bir xil sabab ikki marta qo‘shilmaydi (katta-kichik harf va apostrof farqi hisobga olinmaydi).</p>
+                    <div class="branch-list">
+                        @foreach (var reason in reasons)
+                        {
+                            <div class="branch-item"><span class="branch-icon">↗</span><span><strong>@reason.Name</strong></span><button class="btn-link" @onclick="() => Deactivate(reason.Id)">O‘chirish</button></div>
+                        }
+                    </div>
+                    <div class="inline-form section-gap">
+                        <div><input class="form-control" placeholder="Yangi sabab" @bind="newReason" /></div>
+                        <button class="btn btn-primary btn-small" @onclick="AddReason">Qo‘shish</button>
+                    </div>
+                </section>
+            </AuthorizeView>
+        </div>
+    </div>
+</section>
+
+@code {
+    private DateOnly from = DateOnly.FromDateTime(DateTime.Today).AddMonths(-3);
+    private DateOnly to = DateOnly.FromDateTime(DateTime.Today);
+    private string reasonFilter = "";
+    private IReadOnlyList<LeftStudentRow> rows = [];
+    private IReadOnlyList<LeaveReason> reasons = [];
+    private string newReason = "";
+    private string? message;
+    private bool isError;
+
+    private IEnumerable<LeftStudentRow> Visible => rows.Where(r => reasonFilter.Length == 0 || r.Reason == reasonFilter);
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            rows = await Accounts.GetLeftStudentsAsync(from, to);
+            reasons = await Accounts.GetLeaveReasonsAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            message = exception.Message;
+            isError = true;
+        }
+    }
+
+    private async Task AddReason()
+    {
+        try
+        {
+            await Accounts.AddLeaveReasonAsync(newReason);
+            newReason = "";
+            message = "Sabab qo‘shildi.";
+            isError = false;
+            reasons = await Accounts.GetLeaveReasonsAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            message = exception is Microsoft.EntityFrameworkCore.DbUpdateException ? "Bu sabab allaqachon mavjud." : exception.Message;
+            isError = true;
+        }
+    }
+
+    private async Task Deactivate(int id)
+    {
+        try
+        {
+            await Accounts.DeactivateLeaveReasonAsync(id);
+            reasons = await Accounts.GetLeaveReasonsAsync();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException)
+        {
+            message = exception.Message;
+            isError = true;
+        }
+    }
+}

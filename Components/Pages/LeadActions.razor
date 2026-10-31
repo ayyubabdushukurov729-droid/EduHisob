@@ -1,0 +1,49 @@
+@* Lid kartasidagi amallar: bosqichni o'zgartirish, yo'qotilgan deb belgilash, o'quvchiga aylantirish. *@
+
+@if (Lead.Stage is LeadStage.Converted)
+{
+    return;
+}
+
+@if (losing)
+{
+    <div class="kanban-card-actions">
+        <input class="form-control" placeholder="Nega yo‘qotildi? (majburiy)" @bind="lostReason" />
+        <div class="inline-actions">
+            <button class="btn btn-danger btn-small" @onclick="ConfirmLost">Yo‘qotildi</button>
+            <button class="btn btn-secondary btn-small" @onclick="() => losing = false">Bekor</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="kanban-card-actions">
+        <div class="inline-actions">
+            @if (Lead.Stage == LeadStage.New) { <button class="btn-link" @onclick="() => OnMove.InvokeAsync((Lead.Id, LeadStage.Contacted, string.Empty))">Bog‘lanildi →</button> }
+            @if (Lead.Stage is LeadStage.New or LeadStage.Contacted) { <button class="btn-link" @onclick="() => OnMove.InvokeAsync((Lead.Id, LeadStage.TrialLesson, string.Empty))">Sinov darsiga →</button> }
+            @if (Lead.Stage == LeadStage.Lost) { <button class="btn-link" @onclick="() => OnMove.InvokeAsync((Lead.Id, LeadStage.Contacted, string.Empty))">Qayta ochish</button> }
+        </div>
+        @if (Lead.Stage != LeadStage.Lost)
+        {
+            <div class="inline-actions">
+                <button class="btn btn-primary btn-small" @onclick="() => OnConvert.InvokeAsync(Lead.Id)">O‘quvchi qilish</button>
+                <button class="btn btn-danger btn-small" @onclick="() => losing = true">Yo‘qotildi</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public LeadRow Lead { get; set; } = null!;
+    [Parameter] public EventCallback<(int Id, LeadStage Stage, string Reason)> OnMove { get; set; }
+    [Parameter] public EventCallback<int> OnConvert { get; set; }
+
+    private bool losing;
+    private string lostReason = "";
+
+    private async Task ConfirmLost()
+    {
+        await OnMove.InvokeAsync((Lead.Id, LeadStage.Lost, lostReason));
+        losing = false;
+    }
+}

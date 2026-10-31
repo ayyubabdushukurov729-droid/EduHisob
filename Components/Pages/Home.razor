@@ -1,0 +1,79 @@
+@page "/"
+@layout EduHisob.Components.Layout.LandingLayout
+@using Microsoft.AspNetCore.Components.Authorization
+@inject RegistrationAvailability Registration
+
+<PageTitle>EduHisob — o‘quv markazlari boshqaruvi</PageTitle>
+
+<main class="landing">
+    <nav class="landing-nav">
+        <a class="brand" href="/">
+            <span class="brand-mark">E</span>
+            <span>EduHisob</span>
+        </a>
+        <div class="landing-nav-actions">
+            <a class="nav-login" href="Account/Login">Kirish</a>
+            @if (Registration.Enabled)
+            {
+                <a class="btn btn-primary nav-cta" href="Account/Register">Markaz ochish <span aria-hidden="true">↗</span></a>
+            }
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow"><span class="eyebrow-dot"></span> O‘QUV MARKAZLARI UCHUN BOSHQARUV TIZIMI</p>
+            <h1>Markazingizdagi tartib — <span>bitta joyda.</span></h1>
+            <p class="hero-description">O‘quvchilar va filiallarni yagona kabinetdan boshqaring. Har bir markazning akkaunti va ma’lumotlari boshqalardan alohida saqlanadi; platforma yangi bo‘limlar bilan bosqichma-bosqich kengayadi.</p>
+            <div class="hero-actions">
+                @if (Registration.Enabled)
+                {
+                    <a class="btn btn-primary hero-cta" href="Account/Register">Bepul boshlash <span aria-hidden="true">→</span></a>
+                }
+                <a class="hero-sign-in" href="Account/Login">Kabinetga kirish <span aria-hidden="true">↗</span></a>
+            </div>
+            @if (Registration.Enabled)
+            {
+                <p class="hero-note"><span aria-hidden="true">✓</span> 14 kunlik sinov muddati · karta talab qilinmaydi</p>
+            }
+            else
+            {
+                <p class="hero-note">Yangi hisoblar xavfsiz ro‘yxatdan o‘tish tayyor bo‘lguncha yopiq.</p>
+            }
+        </div>
+        <div class="hero-visual" aria-label="EduHisob boshqaruv paneli tasviri">
+            <div class="visual-glow"></div>
+            <div class="platform-card">
+                <div class="platform-card-top"><span class="brand-mark">E</span><div><strong>EduHisob</strong><small>KO‘P TASHKILOTLI PLATFORMA</small></div><span class="platform-live">1-bosqich</span></div>
+                <div class="platform-card-title"><p>HAR BIR MARKAZ UCHUN</p><h2>Alohida kabinet.<br /><span>Umumiy tartib.</span></h2><small>Markaz ma’lumotlari tashkilot doirasida saqlanadi.</small></div>
+                <div class="module-status-list">
+                    <div><span class="module-status-icon violet">♙</span><span><strong>O‘quvchilar</strong><small>Ro‘yxat va holatni yuritish</small></span><span class="module-available">Ishlaydi</span></div>
+                    <div><span class="module-status-icon blue">⌂</span><span><strong>Filiallar</strong><small>Markaz manzillarini boshqarish</small></span><span class="module-available">Ishlaydi</span></div>
+                    <div><span class="module-status-icon mint">▣</span><span><strong>Guruhlar va davomat</strong><small>Kurslar, guruhlar va davomat</small></span><span class="module-available">Ishlaydi</span></div>
+                    <div><span class="module-status-icon amber">◇</span><span><strong>Ish haqi va xarajatlar</strong><small>Xodimlar, to‘lovlar va xarajatlar</small></span><span class="module-available">Ishlaydi</span></div>
+                </div>
+                <div class="platform-card-footer"><span class="live-dot"></span> O‘quv markazlari uchun yagona platforma</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="trust-strip">
+        <p>EduHisob’ning hozirgi ishlaydigan bo‘limlari</p>
+        <div><span>○ Markaz kabineti</span><span>♙ O‘quvchilar</span><span>⌂ Filiallar</span><span>▣ Guruhlar va davomat</span><span>◇ Ish haqi va xarajatlar</span></div>
+    </section>
+
+    <section class="features">
+        <div class="section-heading"><p class="eyebrow">EDUHISOB IMKONIYATLARI</p><h2>Markaz boshqaruvi — <span>bir joyda.</span></h2><p>O‘quv jarayoni, jamoa va xarajatlarni yagona kabinetdan boshqaring.</p></div>
+        <div class="feature-grid">
+            <article class="feature-card"><span class="feature-icon violet">♙</span><h3>O‘quvchilar <span class="feature-available">Ishlaydi</span></h3><p>O‘quvchi qo‘shish, qidirish, filialga biriktirish va holatini ko‘rish.</p></article>
+            <article class="feature-card"><span class="feature-icon blue">⌂</span><h3>Filiallar <span class="feature-available">Ishlaydi</span></h3><p>Markazingiz filiallarini ochish va ularning manzillarini yuritish.</p></article>
+            <article class="feature-card"><span class="feature-icon mint">◷</span><h3>Guruhlar va davomat <span class="feature-available">Ishlaydi</span></h3><p>Kurslar, dars jadvallari, guruhlar va davomatni yuriting.</p></article>
+            <article class="feature-card"><span class="feature-icon amber">◇</span><h3>Jamoa va xarajatlar <span class="feature-available">Ishlaydi</span></h3><p>Ustozlarni boshqaring, oylik to‘lovlarini va filial xarajatlarini qayd eting.</p></article>
+            <article class="feature-card"><span class="feature-icon violet">▤</span><h3>O‘quvchi to‘lovlari <span class="feature-planned">Rejada</span></h3><p>O‘quvchi to‘lovlari, qarzdorlik va moliyaviy hisobotlar ishlab chiqilmoqda.</p></article>
+        </div>
+    </section>
+
+    <section class="bottom-cta"><div><p class="eyebrow">BOSHLASH UCHUN TAYYORMISIZ?</p><h2>Markazingiz uchun kabinet oching.</h2><p>@(Registration.Enabled ? "Ro‘yxatdan o‘ting va EduHisob bilan tartibli ishlashni boshlang." : "Yangi hisoblar xavfsiz ro‘yxatdan o‘tish tayyor bo‘lguncha yopiq.")</p></div>@if (Registration.Enabled) { <a class="btn btn-primary hero-cta" href="Account/Register">Markaz ochish <span aria-hidden="true">→</span></a> }</section>
+
+    <footer class="landing-footer"><a class="brand" href="/"><span class="brand-mark small">E</span><span>EduHisob</span></a><span>O‘quv markazlari uchun boshqaruv platformasi</span><a href="Account/Login">Kabinetga kirish</a></footer>
+</main>
